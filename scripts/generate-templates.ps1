@@ -65,21 +65,21 @@ Write-Host "Generating CI template..." -ForegroundColor Yellow
 $ciTemplate = Get-CITemplate -ApplicationType $ApplicationType -Language $Language -ProjectName $ProjectName
 $ciFilePath = "$outputDir/ci-$langSlug-$appTypeSlug.yml"
 Set-Content -Path $ciFilePath -Value $ciTemplate -Encoding UTF8
-Write-Host "✓ CI template created: $ciFilePath" -ForegroundColor Green
+Write-Host "CI template created: $ciFilePath" -ForegroundColor Green
 
 # Generate CD Template
 Write-Host "Generating CD template..." -ForegroundColor Yellow
 $cdTemplate = Get-CDTemplate -ApplicationType $ApplicationType -Language $Language -DeploymentType $DeploymentType -ProjectName $ProjectName
 $cdFilePath = "$outputDir/cd-$deploySlug-$langSlug-$appTypeSlug.yml"
 Set-Content -Path $cdFilePath -Value $cdTemplate -Encoding UTF8
-Write-Host "✓ CD template created: $cdFilePath" -ForegroundColor Green
+Write-Host "CD template created: $cdFilePath" -ForegroundColor Green
 
 # Generate Configuration Guide
 Write-Host "Generating configuration guide..." -ForegroundColor Yellow
 $configGuide = Get-ConfigurationGuide -ApplicationType $ApplicationType -Language $Language -DeploymentType $DeploymentType -ProjectName $ProjectName
 $guideFilePath = "$outputDir/CONFIGURATION-GUIDE.md"
 Set-Content -Path $guideFilePath -Value $configGuide -Encoding UTF8
-Write-Host "✓ Configuration guide created: $guideFilePath" -ForegroundColor Green
+Write-Host "Configuration guide created: $guideFilePath" -ForegroundColor Green
 
 Write-Host "`n=== Template Generation Complete ===" -ForegroundColor Green
 Write-Host "All files generated in: $outputDir/" -ForegroundColor Cyan
