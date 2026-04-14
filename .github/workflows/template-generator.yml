@@ -1,0 +1,95 @@
+name: Template Generator Tool
+
+# This reusable workflow provides a UI for generating CI/CD templates
+# based on user-selected application type, language, and deployment type
+
+on:
+  workflow_dispatch:
+    inputs:
+      application_type:
+        description: 'Application Type'
+        required: true
+        type: choice
+        options:
+          - 'Azure Function Apps'
+          - 'Azure App Service'
+          - 'Azure Container Apps'
+          - 'Azure Logic Apps'
+          - 'Azure API Management'
+          - 'Azure Data & ETL Applications'
+          - 'Azure Cognitive AI Apps'
+      
+      language:
+        description: 'Programming Language'
+        required: true
+        type: choice
+        options:
+          - '.NET'
+          - 'Python'
+          - 'Node'
+      
+      deployment_type:
+        description: 'Deployment Type'
+        required: true
+        type: choice
+        options:
+          - 'IIS'
+          - 'AKS'
+          - 'Azure'
+      
+      project_name:
+        description: 'Project Name (for generated files)'
+        required: true
+        type: string
+        default: 'my-project'
+
+jobs:
+  generate-templates:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      
+      - name: Setup PowerShell
+        shell: pwsh
+        run: |
+          Write-Host "PowerShell version: $($PSVersionTable.PSVersion)"
+      
+      - name: Generate CI/CD Templates
+        shell: pwsh
+        env:
+          APP_TYPE: ${{ inputs.application_type }}
+          LANGUAGE: ${{ inputs.language }}
+          DEPLOYMENT_TYPE: ${{ inputs.deployment_type }}
+          PROJECT_NAME: ${{ inputs.project_name }}
+        run: |
+          # Execute the template generation script
+          ./scripts/generate-templates.ps1 `
+            -ApplicationType "$env:APP_TYPE" `
+            -Language "$env:LANGUAGE" `
+            -DeploymentType "$env:DEPLOYMENT_TYPE" `
+            -ProjectName "$env:PROJECT_NAME"
+      
+      - name: Upload Generated Templates
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-templates-${{ inputs.project_name }}
+          path: |
+            generated/*.yml
+            generated/*.yaml
+            generated/**/*
+          retention-days: 30
+      
+      - name: Display Summary
+        shell: pwsh
+        run: |
+          Write-Host "`n=== Template Generation Summary ===" -ForegroundColor Green
+          Write-Host "Application Type: ${{ inputs.application_type }}" -ForegroundColor Cyan
+          Write-Host "Language: ${{ inputs.language }}" -ForegroundColor Cyan
+          Write-Host "Deployment Type: ${{ inputs.deployment_type }}" -ForegroundColor Cyan
+          Write-Host "Project Name: ${{ inputs.project_name }}" -ForegroundColor Cyan
+          Write-Host "`nGenerated files are available in the artifacts section." -ForegroundColor Yellow
+          Write-Host "Download and review the templates before using them in your project.`n" -ForegroundColor Yellow
