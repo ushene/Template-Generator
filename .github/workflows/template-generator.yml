@@ -47,6 +47,10 @@ jobs:
   generate-templates:
     runs-on: ubuntu-latest
     
+    # Force Node.js 24 for all actions to avoid deprecation warnings
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
