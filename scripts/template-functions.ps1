@@ -1235,6 +1235,42 @@ function Get-DeploymentTroubleshooting {
 function Get-AdditionalResources {
     param([string]$DeploymentType)
     
+    $resources = ""
+    
+    switch ($DeploymentType) {
+        'Azure' {
+            $resources = @"
+- [Azure App Service Documentation](https://docs.microsoft.com/en-us/azure/app-service/)
+- [Azure Functions Documentation](https://docs.microsoft.com/en-us/azure/azure-functions/)
+"@
+        }
+        'AKS' {
+            $resources = @"
+- [Azure Kubernetes Service Documentation](https://docs.microsoft.com/en-us/azure/aks/)
+- [Kubernetes Documentation](https://kubernetes.io/docs/)
+"@
+        }
+        'IIS' {
+            $resources = @"
+- [IIS Documentation](https://docs.microsoft.com/en-us/iis/)
+- [PowerShell Remoting Documentation](https://docs.microsoft.com/en-us/powershell/scripting/learn/remoting/running-remote-commands)
+"@
+        }
+    }
+    
+    return $resources
+}
+
+# ============================================================================
+# REUSABLE WORKFLOW TEMPLATES
+# ============================================================================
+
+function Get-ReusableCIWorkflow {
+    param(
+        [string]$Language
+    )
+    param([string]$DeploymentType)
+    
     switch ($DeploymentType) {
         'Azure' {
             return @"
