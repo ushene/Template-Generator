@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 
 <#
 .SYNOPSIS
@@ -237,7 +237,7 @@ jobs:
           Write-Host "Packaging application..." -ForegroundColor Cyan
           `$packageName = "`$env:APP_NAME-`$env:APP_VERSION"
           $packageCommand
-          Write-Host "✓ Package created: artifacts/`$packageName.zip" -ForegroundColor Green
+          Write-Host "âœ“ Package created: artifacts/`$packageName.zip" -ForegroundColor Green
       
       # Step 9: Publish to JFrog Artifactory
       - name: Publish to JFrog
@@ -261,7 +261,7 @@ jobs:
           Write-Host "Uploading to `$targetPath" -ForegroundColor Cyan
           jfrog rt upload "artifacts/*" "`$targetPath" --flat=false --recursive=true
           
-          Write-Host "✓ Artifacts published successfully" -ForegroundColor Green
+          Write-Host "âœ“ Artifacts published successfully" -ForegroundColor Green
       
       # Step 10: Upload build artifacts to GitHub
       - name: Upload artifacts to GitHub
@@ -310,7 +310,7 @@ function Get-ReusableCDWorkflow {
           Write-Host "Logging in to Azure..." -ForegroundColor Cyan
           az login --service-principal -u ${{ secrets.AZURE_CLIENT_ID }} -p ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
           az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          Write-Host "✓ Azure login successful" -ForegroundColor Green
+          Write-Host "âœ“ Azure login successful" -ForegroundColor Green
 '@
             
             $deploySteps = @'
@@ -350,7 +350,7 @@ function Get-ReusableCDWorkflow {
             Write-Host "app_url=https://$appUrl" >> $env:GITHUB_OUTPUT
           }
           
-          Write-Host "✓ Deployment complete" -ForegroundColor Green
+          Write-Host "âœ“ Deployment complete" -ForegroundColor Green
 '@
         }
         'AKS' {
@@ -362,7 +362,7 @@ function Get-ReusableCDWorkflow {
           az login --service-principal -u ${{ secrets.AZURE_CLIENT_ID }} -p ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
           az aks get-credentials --resource-group ${{ inputs.aks-resource-group }} --name ${{ inputs.aks-cluster-name }}
           kubectl cluster-info
-          Write-Host "✓ Kubernetes setup complete" -ForegroundColor Green
+          Write-Host "âœ“ Kubernetes setup complete" -ForegroundColor Green
 '@
             
             $deploySteps = @'
@@ -391,7 +391,7 @@ function Get-ReusableCDWorkflow {
           $serviceIP = kubectl get service ${{ inputs.app-name }} -n ${{ inputs.kubernetes-namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
           Write-Host "app_url=http://$serviceIP" >> $env:GITHUB_OUTPUT
           
-          Write-Host "✓ Deployment complete" -ForegroundColor Green
+          Write-Host "âœ“ Deployment complete" -ForegroundColor Green
 '@
         }
         'IIS' {
@@ -401,7 +401,7 @@ function Get-ReusableCDWorkflow {
         run: |
           Write-Host "Validating IIS server connection..." -ForegroundColor Cyan
           Test-NetConnection -ComputerName ${{ inputs.iis-server }} -Port 5985 -InformationLevel Detailed
-          Write-Host "✓ Connection validated" -ForegroundColor Green
+          Write-Host "âœ“ Connection validated" -ForegroundColor Green
 '@
             
             $deploySteps = @'
@@ -444,7 +444,7 @@ function Get-ReusableCDWorkflow {
           Remove-PSSession $session
           
           Write-Host "app_url=http://${{ inputs.iis-server }}" >> $env:GITHUB_OUTPUT
-          Write-Host "✓ Deployment complete" -ForegroundColor Green
+          Write-Host "âœ“ Deployment complete" -ForegroundColor Green
 '@
         }
     }
@@ -643,7 +643,7 @@ jobs:
           New-Item -ItemType Directory -Path "artifacts" -Force | Out-Null
           jfrog rt download "`$artifactPath" "artifacts/" --flat=false
           
-          Write-Host "✓ Artifacts downloaded" -ForegroundColor Green
+          Write-Host "âœ“ Artifacts downloaded" -ForegroundColor Green
       
       # Step 3: Pre-deployment steps
 $preDeploySteps
@@ -670,7 +670,7 @@ $deploySteps
               `$response = Invoke-WebRequest -Uri "`$appUrl/health" -Method Get -TimeoutSec 30
               
               if (`$response.StatusCode -eq 200) {
-                Write-Host "✓ Health check passed!" -ForegroundColor Green
+                Write-Host "âœ“ Health check passed!" -ForegroundColor Green
                 break
               }
             }
@@ -678,7 +678,7 @@ $deploySteps
               if (`$retryCount -lt `$maxRetries) {
                 Start-Sleep -Seconds 30
               } else {
-                Write-Host "⚠️  Health check failed" -ForegroundColor Red
+                Write-Host "âš ï¸  Health check failed" -ForegroundColor Red
                 exit 1
               }
             }
@@ -890,6 +890,111 @@ function Get-AzureDevOpsMigrationGuide {
         [string]$ProjectName
     )
     
+    # Build conditional sections first to avoid nested here-strings
+    $serviceConnectionSection = ""
+    if ($DeploymentType -eq 'Azure') {
+        $serviceConnectionSection = @"
+#### Azure Service Connection
+``````yaml
+# Azure DevOps
+azureSubscription: 'Azure-Production'
+
+# GitHub Actions
+secrets:
+  AZURE_SUBSCRIPTION_ID: `${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  AZURE_TENANT_ID: `${{ secrets.AZURE_TENANT_ID }}
+  AZURE_CLIENT_ID: `${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_CLIENT_SECRET: `${{ secrets.AZURE_CLIENT_SECRET }}
+``````
+"@
+    } elseif ($DeploymentType -eq 'IIS') {
+        $serviceConnectionSection = @"
+#### IIS Server Connection
+``````yaml
+# Azure DevOps
+connection: 'IIS-Production-Server'
+
+# GitHub Actions
+secrets:
+  IIS_SERVER: `${{ secrets.IIS_SERVER }}
+  IIS_USERNAME: `${{ secrets.IIS_USERNAME }}
+  IIS_PASSWORD: `${{ secrets.IIS_PASSWORD }}
+``````
+"@
+    }
+    
+    $requiredSecretsSection = ""
+    if ($DeploymentType -eq 'Azure') {
+        $requiredSecretsSection = @"
+**Azure Deployment:**
+- ``AZURE_SUBSCRIPTION_ID``
+- ``AZURE_TENANT_ID``
+- ``AZURE_CLIENT_ID``
+- ``AZURE_CLIENT_SECRET``
+"@
+    } elseif ($DeploymentType -eq 'AKS') {
+        $requiredSecretsSection = @"
+**Azure Kubernetes Service:**
+- ``AZURE_SUBSCRIPTION_ID``
+- ``AZURE_TENANT_ID``
+- ``AZURE_CLIENT_ID``
+- ``AZURE_CLIENT_SECRET``
+- ``ACR_PASSWORD``
+"@
+    } elseif ($DeploymentType -eq 'IIS') {
+        $requiredSecretsSection = @"
+**IIS Deployment:**
+- ``IIS_USERNAME``
+- ``IIS_PASSWORD``
+"@
+    }
+    
+    $envVarsSection = ""
+    if ($DeploymentType -eq 'Azure') {
+        $envVarsSection = @"
+- ``DEV_RESOURCE_GROUP``: Azure resource group
+- ``DEV_RESOURCE_NAME``: App Service name
+"@
+    } elseif ($DeploymentType -eq 'AKS') {
+        $envVarsSection = @"
+- ``DEV_AKS_CLUSTER``: AKS cluster name
+- ``DEV_AKS_RG``: AKS resource group
+- ``ACR_NAME``: Container registry name
+- ``ACR_USERNAME``: Registry username
+"@
+    } elseif ($DeploymentType -eq 'IIS') {
+        $envVarsSection = @"
+- ``DEV_IIS_SERVER``: IIS server address
+- ``DEV_IIS_SITE``: IIS site name
+- ``DEV_IIS_POOL``: Application pool name
+- ``DEV_IIS_PATH``: Deployment path
+"@
+    }
+    
+    $troubleshootingSection = ""
+    if ($DeploymentType -eq 'Azure') {
+        $troubleshootingSection = @"
+- Verify service principal has contributor role
+- Check subscription ID is correct
+- Ensure resource group permissions
+"@
+    } elseif ($DeploymentType -eq 'IIS') {
+        $troubleshootingSection = @"
+- Check IIS username has admin rights
+- Verify WinRM is enabled on server
+- Confirm firewall allows port 5985
+"@
+    } else {
+        $troubleshootingSection = @"
+- Verify Kubernetes permissions
+- Check service account roles
+- Confirm cluster credentials
+"@
+    }
+    
+    $langSlug = $Language.ToLower() -replace '\.', ''
+    $deploySlug = $DeploymentType.ToLower()
+    
     $template = @"
 # Azure DevOps to GitHub Actions Migration Guide
 
@@ -928,12 +1033,12 @@ This migration converts your Azure DevOps pipeline to GitHub Actions using:
 
 ## Concept Mapping
 
-### Service Connections → GitHub Secrets
+### Service Connections â†’ GitHub Secrets
 
 **Azure DevOps Service Connections** are replaced by **GitHub Repository Secrets**.
 
 #### JFrog Service Connection
-\`\`\`yaml
+``````yaml
 # Azure DevOps
 service: jfrog-artifactory
 
@@ -942,40 +1047,11 @@ secrets:
   JFROG_URL: `${{ secrets.JFROG_URL }}
   JFROG_USERNAME: `${{ secrets.JFROG_USERNAME }}
   JFROG_PASSWORD: `${{ secrets.JFROG_PASSWORD }}
-\`\`\`
+``````
 
-$( if ($DeploymentType -eq 'Azure') {
-@"
-#### Azure Service Connection
-\`\`\`yaml
-# Azure DevOps
-azureSubscription: 'Azure-Production'
+$serviceConnectionSection
 
-# GitHub Actions
-secrets:
-  AZURE_SUBSCRIPTION_ID: `${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  AZURE_TENANT_ID: `${{ secrets.AZURE_TENANT_ID }}
-  AZURE_CLIENT_ID: `${{ secrets.AZURE_CLIENT_ID }}
-  AZURE_CLIENT_SECRET: `${{ secrets.AZURE_CLIENT_SECRET }}
-\`\`\`
-"@
-} elseif ($DeploymentType -eq 'IIS') {
-@"
-#### IIS Server Connection
-\`\`\`yaml
-# Azure DevOps
-connection: 'IIS-Production-Server'
-
-# GitHub Actions
-secrets:
-  IIS_SERVER: `${{ secrets.IIS_SERVER }}
-  IIS_USERNAME: `${{ secrets.IIS_USERNAME }}
-  IIS_PASSWORD: `${{ secrets.IIS_PASSWORD }}
-\`\`\`
-"@
-} )
-
-### Variable Groups → GitHub Environments
+### Variable Groups â†’ GitHub Environments
 
 **Azure DevOps Variable Groups** are replaced by **GitHub Environment Variables**.
 
@@ -985,7 +1061,7 @@ secrets:
 2. Create environments: \`development\`, \`staging\`, \`production\`
 3. Add environment-specific variables
 
-\`\`\`yaml
+``````yaml
 # Azure DevOps Variable Group
 variables:
   - group: prod-config
@@ -997,12 +1073,12 @@ environment:
   name: production
   # Configure in Settings > Environments > production > Variables
   # Add: RESOURCE_GROUP = rg-prod
-\`\`\`
+``````
 
-### Build/Release Patterns → Workflow Patterns
+### Build/Release Patterns â†’ Workflow Patterns
 
 #### Azure DevOps Multi-Stage Pipeline
-\`\`\`yaml
+``````yaml
 # azure-pipelines.yml
 stages:
 - stage: Build
@@ -1016,10 +1092,10 @@ stages:
   jobs:
   - deployment: DeployJob
     environment: production
-\`\`\`
+``````
 
 #### GitHub Actions Equivalent
-\`\`\`yaml
+``````yaml
 # .github/workflows/build.yml
 jobs:
   build:
@@ -1030,7 +1106,7 @@ jobs:
     uses: ./.github/workflows/reusable-cd-azure.yml
     with:
       environment: production
-\`\`\`
+``````
 
 ## Migration Steps
 
@@ -1065,30 +1141,7 @@ Navigate to your GitHub repository > Settings > Secrets and variables > Actions
 - \`SONAR_TOKEN\` (optional)
 - \`SNYK_TOKEN\` (optional)
 
-$( if ($DeploymentType -eq 'Azure') {
-@"
-**Azure Deployment:**
-- \`AZURE_SUBSCRIPTION_ID\`
-- \`AZURE_TENANT_ID\`
-- \`AZURE_CLIENT_ID\`
-- \`AZURE_CLIENT_SECRET\`
-"@
-} elseif ($DeploymentType -eq 'AKS') {
-@"
-**Azure Kubernetes Service:**
-- \`AZURE_SUBSCRIPTION_ID\`
-- \`AZURE_TENANT_ID\`
-- \`AZURE_CLIENT_ID\`
-- \`AZURE_CLIENT_SECRET\`
-- \`ACR_PASSWORD\`
-"@
-} elseif ($DeploymentType -eq 'IIS') {
-@"
-**IIS Deployment:**
-- \`IIS_USERNAME\`
-- \`IIS_PASSWORD\`
-"@
-} )
+$requiredSecretsSection
 
 ### Step 3: Create GitHub Environments
 
@@ -1101,26 +1154,7 @@ $( if ($DeploymentType -eq 'Azure') {
 3. For each environment, add variables:
 
 #### Development Environment
-$( if ($DeploymentType -eq 'Azure') {
-@"
-- \`DEV_RESOURCE_GROUP\`: Azure resource group
-- \`DEV_RESOURCE_NAME\`: App Service name
-"@
-} elseif ($DeploymentType -eq 'AKS') {
-@"
-- \`DEV_AKS_CLUSTER\`: AKS cluster name
-- \`DEV_AKS_RG\`: AKS resource group
-- \`ACR_NAME\`: Container registry name
-- \`ACR_USERNAME\`: Registry username
-"@
-} elseif ($DeploymentType -eq 'IIS') {
-@"
-- \`DEV_IIS_SERVER\`: IIS server address
-- \`DEV_IIS_SITE\`: IIS site name
-- \`DEV_IIS_POOL\`: Application pool name
-- \`DEV_IIS_PATH\`: Deployment path
-"@
-} )
+$envVarsSection
 
 *(Repeat for staging and production with appropriate prefixes)*
 
@@ -1128,13 +1162,13 @@ $( if ($DeploymentType -eq 'Azure') {
 
 Create the following structure in your repository:
 
-\`\`\`
+``````
 .github/
-└── workflows/
-    ├── build.yml                    # Main orchestrator
-    ├── reusable-ci-$( $Language.ToLower() -replace '\.', '' ).yml      # CI reusable workflow
-    └── reusable-cd-$( $DeploymentType.ToLower() ).yml     # CD reusable workflow
-\`\`\`
+â””â”€â”€ workflows/
+    â”œâ”€â”€ build.yml                    # Main orchestrator
+    â”œâ”€â”€ reusable-ci-$langSlug.yml      # CI reusable workflow
+    â””â”€â”€ reusable-cd-$deploySlug.yml     # CD reusable workflow
+``````
 
 ### Step 5: Configure Branch Protection
 
@@ -1148,7 +1182,7 @@ Create the following structure in your repository:
 ### Step 6: Test the Migration
 
 1. **Test CI Workflow**
-   \`\`\`bash
+   ``````bash
    # Create a feature branch
    git checkout -b feature/test-github-actions
    
@@ -1159,7 +1193,7 @@ Create the following structure in your repository:
    git push origin feature/test-github-actions
    
    # Create PR and verify workflow runs
-   \`\`\`
+   ``````
 
 2. **Test CD Workflow**
    - Trigger manual deployment to development
@@ -1172,70 +1206,70 @@ Create the following structure in your repository:
 ### Pattern 1: Conditional Deployment
 
 **Azure DevOps:**
-\`\`\`yaml
+``````yaml
 - stage: Deploy
   condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
-\`\`\`
+``````
 
 **GitHub Actions:**
-\`\`\`yaml
+``````yaml
 deploy:
   if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-\`\`\`
+``````
 
 ### Pattern 2: Manual Approvals
 
 **Azure DevOps:**
-\`\`\`yaml
+``````yaml
 environment:
   name: production
   # Approvals configured in UI
-\`\`\`
+``````
 
 **GitHub Actions:**
-\`\`\`yaml
+``````yaml
 environment:
   name: production
   # Configure protection rules in Settings > Environments
-\`\`\`
+``````
 
 ### Pattern 3: Artifact Publishing
 
 **Azure DevOps:**
-\`\`\`yaml
+``````yaml
 - task: PublishBuildArtifacts@1
   inputs:
     PathtoPublish: '`$(Build.ArtifactStagingDirectory)'
     ArtifactName: 'drop'
-\`\`\`
+``````
 
 **GitHub Actions:**
-\`\`\`yaml
+``````yaml
 - uses: actions/upload-artifact@v4
   with:
     name: build-artifacts
     path: artifacts/
-\`\`\`
+``````
 
 ### Pattern 4: Environment Variables
 
 **Azure DevOps:**
-\`\`\`yaml
+``````yaml
 variables:
   buildConfiguration: 'Release'
   
 steps:
 - script: dotnet build --configuration `$(buildConfiguration)
-\`\`\`
+``````
 
 **GitHub Actions:**
-\`\`\`yaml
+``````yaml
 env:
   BUILD_CONFIGURATION: 'Release'
   
 steps:
 - run: dotnet build --configuration `${{ env.BUILD_CONFIGURATION }}
-\`\`\`
+``````
 
 ## Troubleshooting
 
@@ -1271,36 +1305,18 @@ steps:
 **Problem:** Cannot deploy to target environment
 
 **Solution:**
-$( if ($DeploymentType -eq 'Azure') {
-@"
-- Verify service principal has contributor role
-- Check subscription ID is correct
-- Ensure resource group permissions
-"@
-} elseif ($DeploymentType -eq 'IIS') {
-@"
-- Check IIS username has admin rights
-- Verify WinRM is enabled on server
-- Confirm firewall allows port 5985
-"@
-} else {
-@"
-- Verify Kubernetes permissions
-- Check service account roles
-- Confirm cluster credentials
-"@
-} )
+$troubleshootingSection
 
 ## Next Steps
 
-1. ✅ Complete secret migration
-2. ✅ Setup GitHub environments
-3. ✅ Test CI workflows
-4. ✅ Test CD workflows
-5. ✅ Configure branch protection
-6. ✅ Setup environment protection rules
-7. ✅ Train team on GitHub Actions
-8. ✅ Decommission Azure DevOps pipelines
+1. âœ… Complete secret migration
+2. âœ… Setup GitHub environments
+3. âœ… Test CI workflows
+4. âœ… Test CD workflows
+5. âœ… Configure branch protection
+6. âœ… Setup environment protection rules
+7. âœ… Train team on GitHub Actions
+8. âœ… Decommission Azure DevOps pipelines
 
 ## Additional Resources
 
@@ -1334,3 +1350,5 @@ For migration assistance:
     
     return $template
 }
+
+
