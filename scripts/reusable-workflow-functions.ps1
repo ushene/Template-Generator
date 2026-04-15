@@ -1205,7 +1205,7 @@ environment:
 \`\`\`yaml
 - task: PublishBuildArtifacts@1
   inputs:
-    PathtoPublish: '\$(Build.ArtifactStagingDirectory)'
+    PathtoPublish: '`$(Build.ArtifactStagingDirectory)'
     ArtifactName: 'drop'
 \`\`\`
 
@@ -1225,7 +1225,7 @@ variables:
   buildConfiguration: 'Release'
   
 steps:
-- script: dotnet build --configuration \$(buildConfiguration)
+- script: dotnet build --configuration `$(buildConfiguration)
 \`\`\`
 
 **GitHub Actions:**
