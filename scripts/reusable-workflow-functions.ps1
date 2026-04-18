@@ -873,10 +873,10 @@ jobs:
       SONAR_TOKEN: `${{ secrets.SONAR_TOKEN }}
       SNYK_TOKEN: `${{ secrets.SNYK_TOKEN }}
   
-  # Job 2: Deploy to development (automatic on develop branch)
+  # Job 2: Deploy to development (automatic on develop branch or manual dispatch)
   deploy-dev:
     name: Deploy to Development
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'development') }}
     needs: build
     uses: ./.github/workflows/reusable-cd-$( $DeploymentType.ToLower() ).yml
     with:
@@ -909,10 +909,10 @@ iis-server: `${{ vars.DEV_IIS_SERVER }}
       } )
     secrets: inherit
   
-  # Job 3: Deploy to staging (automatic on main branch)
+  # Job 3: Deploy to staging (automatic on main branch or manual dispatch)
   deploy-staging:
     name: Deploy to Staging
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging') }}
     needs: build
     uses: ./.github/workflows/reusable-cd-$( $DeploymentType.ToLower() ).yml
     with:
@@ -948,7 +948,7 @@ iis-server: `${{ vars.STAGING_IIS_SERVER }}
   # Job 4: Deploy to production (manual trigger only)
   deploy-production:
     name: Deploy to Production
-    if: inputs.environment == 'production'
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'production' }}
     needs: build
     uses: ./.github/workflows/reusable-cd-$( $DeploymentType.ToLower() ).yml
     with:
