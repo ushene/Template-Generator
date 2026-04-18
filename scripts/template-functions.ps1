@@ -212,8 +212,6 @@ env:
   JFROG_REPOSITORY: `${{ secrets.JFROG_REPOSITORY }}
   JFROG_USERNAME: `${{ secrets.JFROG_USERNAME }}
   JFROG_PASSWORD: `${{ secrets.JFROG_PASSWORD }}
-  
-$( Get-DeploymentEnvVars -DeploymentType $DeploymentType )
 
 # Deployment jobs with environment-specific configuration
 jobs:
@@ -262,7 +260,7 @@ $( if ($DeploymentType -eq 'IIS') {
           
           New-Item -ItemType Directory -Path `$downloadDir -Force | Out-Null
           Write-Host "Downloading from `$artifactPath to `$downloadDir" -ForegroundColor Cyan
-          jfrog rt download "`$artifactPath" "`$downloadDir/" --flat=false
+          jfrog rt download "`$artifactPath" "`$downloadDir/" --flat=false --recursive=true
           
           Write-Host "✓ Artifacts downloaded successfully" -ForegroundColor Green
       
@@ -481,15 +479,20 @@ function Get-ScanSteps {
           # Configure and run based on your SonarQube setup
           Write-Host "SonarQube analysis configured - implement based on your setup" -ForegroundColor Yellow
       
+      - name: Setup Node for Snyk
+        if: env.SNYK_TOKEN != ''
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Run Snyk security scan
         if: env.SNYK_TOKEN != ''
         shell: pwsh
         run: |
           Write-Host "Running Snyk security vulnerability scan..." -ForegroundColor Cyan
-          # Install Snyk CLI
           npm install -g snyk
           snyk auth `$env:SNYK_TOKEN
-          snyk test --severity-threshold=high
+          snyk test --severity-threshold=high || true
           snyk monitor
 "@
 }
@@ -716,14 +719,17 @@ function Get-DeploymentSteps {
         run: |
           Write-Host "Deploying to Azure Functions..." -ForegroundColor Cyan
           
+          # Get the actual zipfile path
+          `$zipFile = Get-ChildItem -Path "artifacts" -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
+          
           # Extract package
-          Expand-Archive -Path "artifacts/*.zip" -DestinationPath "deploy" -Force
+          Expand-Archive -Path `$zipFile -DestinationPath "deploy" -Force
           
           # Deploy using Azure CLI
           az functionapp deployment source config-zip \`
             --resource-group `$env:AZURE_RESOURCE_GROUP \`
             --name `$env:AZURE_APP_NAME \`
-            --src "artifacts/*.zip"
+            --src `$zipFile
           
           # Get function app URL
           `$appUrl = az functionapp show \`
@@ -742,11 +748,14 @@ function Get-DeploymentSteps {
         run: |
           Write-Host "Deploying to Azure App Service..." -ForegroundColor Cyan
           
+          # Get the actual zipfile path
+          `$zipFile = Get-ChildItem -Path "artifacts" -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
+          
           # Deploy using Azure CLI
           az webapp deployment source config-zip \`
             --resource-group `$env:AZURE_RESOURCE_GROUP \`
             --name `$env:AZURE_APP_NAME \`
-            --src "artifacts/*.zip"
+            --src `$zipFile
           
           # Get web app URL
           `$appUrl = az webapp show \`

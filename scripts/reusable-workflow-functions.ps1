@@ -9,11 +9,36 @@
     for CI/CD pipelines that can be called from other workflows.
 #>
 
+function Get-LanguageVersionInputName {
+    param([string]$Language)
+
+    switch ($Language) {
+        '.NET' { return 'dotnet-version' }
+        'Python' { return 'python-version' }
+        'Node' { return 'node-version' }
+        default { return ($Language -replace '\.', '').ToLower() + '-version' }
+    }
+}
+
+function Get-LanguageSlug {
+    param([string]$Language)
+
+    switch ($Language) {
+        '.NET' { return 'net' }
+        'Python' { return 'python' }
+        'Node' { return 'node' }
+        default { return ($Language -replace '\.', '').ToLower() }
+    }
+}
+
 function Get-ReusableCIWorkflow {
     param(
         [string]$Language
     )
     
+    $versionInputName = Get-LanguageVersionInputName -Language $Language
+    $langSlug = Get-LanguageSlug -Language $Language
+
     $buildSteps = ""
     $restoreCommand = ""
     $buildCommand = ""
@@ -80,11 +105,10 @@ on:
         required: false
         type: string
         default: 'Release'
-      $langLower-version:
-        description: '$Language SDK/Runtime version'
+      `$( $versionInputName ):\n        description: '$Language SDK/Runtime version'
         required: false
         type: string
-        default: $( if ($Language -eq '.NET') { "'8.x'" } elseif ($Language -eq 'Python') { "'3.11'" } else { "'20'" } )
+        default: `$( if ($Language -eq '.NET') { "'8.x'" } elseif ($Language -eq 'Python') { "'3.11'" } else { "'20'" } )
       skip-tests:
         description: 'Skip running tests'
         required: false
@@ -324,10 +348,12 @@ function Get-ReusableCDWorkflow {
           $resourceType = "${{ inputs.resource-type }}"
           
           if ($resourceType -eq "webapp") {
+            $zipFile = Get-ChildItem -Path "artifacts" -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
+            if (-not $zipFile) { throw "No deployment package found in artifacts folder" }
             az webapp deployment source config-zip `
               --resource-group ${{ inputs.resource-group }} `
               --name ${{ inputs.resource-name }} `
-              --src "artifacts/*.zip"
+              --src "$zipFile"
               
             $appUrl = az webapp show `
               --resource-group ${{ inputs.resource-group }} `
@@ -337,10 +363,12 @@ function Get-ReusableCDWorkflow {
             Write-Host "app_url=https://$appUrl" >> $env:GITHUB_OUTPUT
           }
           elseif ($resourceType -eq "functionapp") {
+            $zipFile = Get-ChildItem -Path "artifacts" -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
+            if (-not $zipFile) { throw "No deployment package found in artifacts folder" }
             az functionapp deployment source config-zip `
               --resource-group ${{ inputs.resource-group }} `
               --name ${{ inputs.resource-name }} `
-              --src "artifacts/*.zip"
+              --src "$zipFile"
               
             $appUrl = az functionapp show `
               --resource-group ${{ inputs.resource-group }} `
@@ -482,6 +510,10 @@ on:
         required: false
         type: string
         default: '$runnerOS'
+      jfrog-repository:
+        description: 'JFrog repository name'
+        required: true
+        type: string
       $( if ($DeploymentType -eq 'Azure') {
 @"
 resource-group:
@@ -639,9 +671,9 @@ jobs:
           
           jfrog config add artifactory --url="`${{ secrets.JFROG_URL }}" --user="`${{ secrets.JFROG_USERNAME }}" --password="`${{ secrets.JFROG_PASSWORD }}" --interactive=false
           
-          `$artifactPath = "*/`${{ inputs.app-name }}/`${{ inputs.version }}/"
+          `$artifactPath = "`${{ inputs.jfrog-repository }}/`${{ inputs.app-name }}/`${{ inputs.version }}/"
           New-Item -ItemType Directory -Path "artifacts" -Force | Out-Null
-          jfrog rt download "`$artifactPath" "artifacts/" --flat=false
+          jfrog rt download "`$artifactPath" "artifacts/" --flat=false --recursive=true
           
           Write-Host "âœ“ Artifacts downloaded" -ForegroundColor Green
       
@@ -710,7 +742,9 @@ function Get-MainBuildWorkflow {
         [string]$ProjectName
     )
     
-    $langLower = $Language -replace '\.', ''
+    $langLower = Get-LanguageSlug -Language $Language
+    $versionInputName = Get-LanguageVersionInputName -Language $Language
+    $defaultVersion = if ($Language -eq '.NET') { '8.x' } elseif ($Language -eq 'Python') { '3.11' } else { '20' }
     
     $template = @"
 # Main Build Workflow
@@ -763,7 +797,7 @@ jobs:
     with:
       app-name: `${{ env.APP_NAME }}
       build-configuration: 'Release'
-      $langLower-version: '$( if ($Language -eq '.NET') { '8.x' } elseif ($Language -eq 'Python') { '3.11' } else { '20' })}'
+      `$( $versionInputName ): '$defaultVersion'
       skip-tests: `${{ inputs.skip_tests || false }}
       skip-security-scan: false
       jfrog-repository: `${{ env.JFROG_REPOSITORY }}
@@ -785,6 +819,7 @@ jobs:
       version: `${{ needs.build.outputs.artifact-version }}
       environment: 'development'
       skip-health-check: false
+      jfrog-repository: `${{ env.JFROG_REPOSITORY }}
       $( if ($DeploymentType -eq 'Azure') {
 @"
 resource-group: `${{ vars.DEV_RESOURCE_GROUP }}
@@ -820,6 +855,7 @@ iis-server: `${{ vars.DEV_IIS_SERVER }}
       version: `${{ needs.build.outputs.artifact-version }}
       environment: 'staging'
       skip-health-check: false
+      jfrog-repository: `${{ env.JFROG_REPOSITORY }}
       $( if ($DeploymentType -eq 'Azure') {
 @"
 resource-group: `${{ vars.STAGING_RESOURCE_GROUP }}
@@ -855,6 +891,7 @@ iis-server: `${{ vars.STAGING_IIS_SERVER }}
       version: `${{ needs.build.outputs.artifact-version }}
       environment: 'production'
       skip-health-check: false
+      jfrog-repository: `${{ env.JFROG_REPOSITORY }}
       $( if ($DeploymentType -eq 'Azure') {
 @"
 resource-group: `${{ vars.PROD_RESOURCE_GROUP }}
