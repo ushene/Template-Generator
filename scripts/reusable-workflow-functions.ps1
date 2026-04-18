@@ -244,15 +244,80 @@ jobs:
           Write-Host "Running SonarQube code quality analysis..." -ForegroundColor Cyan
           Write-Host "SonarQube analysis configured - implement based on your setup" -ForegroundColor Yellow
       
+      $( if ($Language -eq '.NET') {
+          @'
       - name: Run Snyk security scan
         if: `${{ !inputs.skip-security-scan && secrets.SNYK_TOKEN != '' }}
         shell: pwsh
+        working-directory: test-dotnet-app/src
+        env:
+          SNYK_TOKEN: `${{ secrets.SNYK_TOKEN }}
         run: |
           Write-Host "Running Snyk security vulnerability scan..." -ForegroundColor Cyan
           npm install -g snyk
-          snyk auth `${{ secrets.SNYK_TOKEN }}
+          snyk auth $env:SNYK_TOKEN
+          # For .NET, Snyk scans obj/project.assets.json (created by dotnet restore)
+          # Let Snyk auto-detect the project structure
           snyk test --severity-threshold=high || true
           snyk monitor
+'@
+        } elseif ($Language -eq 'Python') {
+          @'
+      - name: Run Snyk security scan
+        if: `${{ !inputs.skip-security-scan && secrets.SNYK_TOKEN != '' }}
+        shell: pwsh
+        working-directory: test-python-app
+        env:
+          SNYK_TOKEN: `${{ secrets.SNYK_TOKEN }}
+        run: |
+          Write-Host "Running Snyk security vulnerability scan..." -ForegroundColor Cyan
+          npm install -g snyk
+          snyk auth $env:SNYK_TOKEN
+          $reqFile = Get-ChildItem -Path . -Filter requirements.txt -Recurse -File | Select-Object -First 1
+          if (-not $reqFile) {
+            Write-Host "No requirements.txt file found in $(Get-Location). Skipping Snyk scan." -ForegroundColor Yellow
+            exit 0
+          }
+          Write-Host "Using requirements file: $($reqFile.FullName)" -ForegroundColor Cyan
+          snyk test --file="$($reqFile.FullName)" --severity-threshold=high || true
+          snyk monitor --file="$($reqFile.FullName)"
+'@
+        } elseif ($Language -eq 'Node') {
+          @'
+      - name: Run Snyk security scan
+        if: `${{ !inputs.skip-security-scan && secrets.SNYK_TOKEN != '' }}
+        shell: pwsh
+        working-directory: test-node-app
+        env:
+          SNYK_TOKEN: `${{ secrets.SNYK_TOKEN }}
+        run: |
+          Write-Host "Running Snyk security vulnerability scan..." -ForegroundColor Cyan
+          npm install -g snyk
+          snyk auth $env:SNYK_TOKEN
+          $pkgFile = Get-ChildItem -Path . -Filter package.json -Recurse -File | Select-Object -First 1
+          if (-not $pkgFile) {
+            Write-Host "No package.json file found in $(Get-Location). Skipping Snyk scan." -ForegroundColor Yellow
+            exit 0
+          }
+          Write-Host "Using package file: $($pkgFile.FullName)" -ForegroundColor Cyan
+          snyk test --file="$($pkgFile.FullName)" --severity-threshold=high || true
+          snyk monitor --file="$($pkgFile.FullName)"
+'@
+        } else {
+          @'
+      - name: Run Snyk security scan
+        if: `${{ !inputs.skip-security-scan && secrets.SNYK_TOKEN != '' }}
+        shell: pwsh
+        env:
+          SNYK_TOKEN: `${{ secrets.SNYK_TOKEN }}
+        run: |
+          Write-Host "Running Snyk security vulnerability scan..." -ForegroundColor Cyan
+          npm install -g snyk
+          snyk auth $env:SNYK_TOKEN
+          snyk test --severity-threshold=high || true
+          snyk monitor
+'@
+        } )
       
       # Step 8: Package application
       - name: Package application
