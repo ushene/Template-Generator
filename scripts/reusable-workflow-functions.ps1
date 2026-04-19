@@ -336,19 +336,19 @@ jobs:
           Write-Host "Publishing artifacts to JFrog Artifactory..." -ForegroundColor Cyan
           
           # Setup JFrog CLI
-          if (-not (Get-Command jf -ErrorAction SilentlyContinue)) {
+          if (-not (Get-Command jfrog -ErrorAction SilentlyContinue)) {
             Write-Host "Installing JFrog CLI..." -ForegroundColor Yellow
             curl -fL https://install-cli.jfrog.io | sh
-            sudo mv jf /usr/local/bin/
+            sudo mv jfrog /usr/local/bin/
           }
           
           # Configure JFrog CLI
-          jf config add artifactory --url="`${{ secrets.JFROG_URL }}" --user="`${{ secrets.JFROG_USERNAME }}" --password="`${{ secrets.JFROG_PASSWORD }}" --interactive=false
+          jfrog config add artifactory --url="`${{ secrets.JFROG_URL }}" --user="`${{ secrets.JFROG_USERNAME }}" --password="`${{ secrets.JFROG_PASSWORD }}" --interactive=false
           
           # Upload artifacts
           `$targetPath = "`${{ inputs.jfrog-repository }}/`$env:APP_NAME/`$env:APP_VERSION/"
           Write-Host "Uploading to `$targetPath" -ForegroundColor Cyan
-          jf rt upload "artifacts/*" "`$targetPath" --flat=true --recursive=true
+          jfrog rt upload "artifacts/*" "`$targetPath" --flat=false --recursive=true
           
           Write-Host "âœ“ Artifacts published successfully" -ForegroundColor Green
       
@@ -725,23 +725,20 @@ jobs:
         run: |
           Write-Host "Downloading artifacts from JFrog..." -ForegroundColor Cyan
           
-          if (-not (Get-Command jf -ErrorAction SilentlyContinue)) {
+          if (-not (Get-Command jfrog -ErrorAction SilentlyContinue)) {
             Write-Host "Installing JFrog CLI..." -ForegroundColor Yellow
             $( if ($DeploymentType -eq 'IIS') {
-                'Invoke-WebRequest -Uri "https://releases.jfrog.io/artifactory/jfrog-cli/v2/[RELEASE]/jfrog-cli-windows-amd64/jf.exe" -OutFile "jf.exe"' + "`n" +
-                ' $env:PATH += ";$(Get-Location)"'
+                'Invoke-WebRequest -Uri "https://releases.jfrog.io/artifactory/jfrog-cli/v2/[RELEASE]/jfrog-cli-windows-amd64/jfrog.exe" -OutFile "jfrog.exe"'
             } else {
-                'curl -fL https://install-cli.jfrog.io | sh; sudo mv jf /usr/local/bin/'
+                'curl -fL https://install-cli.jfrog.io | sh; sudo mv jfrog /usr/local/bin/'
             } )
           }
           
-          jf config add artifactory --url="`${{ secrets.JFROG_URL }}" --user="`${{ secrets.JFROG_USERNAME }}" --password="`${{ secrets.JFROG_PASSWORD }}" --interactive=false
+          jfrog config add artifactory --url="`${{ secrets.JFROG_URL }}" --user="`${{ secrets.JFROG_USERNAME }}" --password="`${{ secrets.JFROG_PASSWORD }}" --interactive=false
           
           `$artifactPath = "`${{ inputs.jfrog-repository }}/`${{ inputs.app-name }}/`${{ inputs.version }}/"
-          `$artifactPattern = "`$artifactPath*.zip"
           New-Item -ItemType Directory -Path "artifacts" -Force | Out-Null
-          Write-Host "Downloading artifact pattern: `$artifactPattern" -ForegroundColor Cyan
-          jf rt download "`$artifactPattern" "artifacts/" --flat=true --recursive=true
+          jfrog rt download "`$artifactPath" "artifacts/" --flat=false --recursive=true
           
           Write-Host "âœ“ Artifacts downloaded" -ForegroundColor Green
       
