@@ -21,24 +21,50 @@ function Get-CITemplate {
     $scanSteps = Get-ScanSteps -Language $Language
     
     $template = @"
-# CI Pipeline Template
-# Generated for: $ApplicationType ($Language)
-# Project: $ProjectName
-# Description: Build, test, scan, and publish artifacts to JFrog
+# =============================================================================
+# LEGACY CI PIPELINE — $Language ($ApplicationType)
+# =============================================================================
+#
+# PROJECT: $ProjectName
+#
+# PURPOSE:
+#   This is a standalone (legacy) CI pipeline that builds, tests, scans, and
+#   publishes artifacts to JFrog Artifactory. Unlike the reusable workflow
+#   approach, this file contains all CI logic in one place.
+#
+# NOTE:
+#   For new projects, prefer the reusable workflow approach (build.yml +
+#   reusable-ci-*.yml). This legacy template is provided for backward
+#   compatibility with existing pipelines.
+#
+# PIPELINE STEPS:
+#   1. Checkout code
+#   2. Setup $Language SDK
+#   3. Restore dependencies
+#   4. Build application
+#   5. Run unit tests
+#   6. Security scanning (SonarQube + Snyk)
+#   7. Package application
+#   8. Publish to JFrog Artifactory
+#   9. Upload artifacts to GitHub
+# =============================================================================
 
 name: CI - Build and Test
 
+# ---------------------------------------------------------------------------
+# TRIGGERS — When does this workflow run?
+# ---------------------------------------------------------------------------
 on:
   push:
     branches:
-      # Configure branches that should trigger CI builds
-      - main
-      - develop
-      - 'feature/**'
+      - main           # Production branch
+      - develop        # Integration branch
+      - 'feature/**'   # Feature branches
   pull_request:
     branches:
       - main
       - develop
+  # Allow manual trigger from GitHub Actions UI
   workflow_dispatch:
     inputs:
       skip_tests:
@@ -47,61 +73,85 @@ on:
         type: boolean
         default: false
 
-# Environment variables - customize these for your project
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+# Customize these for your project. Secrets are stored in GitHub Settings →
+# Secrets and variables → Actions.
+# =============================================================================
 env:
-  # Build configuration
+  # Build configuration — 'Release' for optimized builds, 'Debug' for development
   BUILD_CONFIGURATION: 'Release'
-  
-  # JFrog Artifactory settings
-  JFROG_URL: `${{ secrets.JFROG_URL }}               # JFrog Artifactory URL
-  JFROG_REPOSITORY: `${{ secrets.JFROG_REPOSITORY }} # Target repository name
+
+  # --- JFrog Artifactory settings ---
+  JFROG_URL: `${{ secrets.JFROG_URL }}               # JFrog Artifactory base URL
+  JFROG_REPOSITORY: `${{ secrets.JFROG_REPOSITORY }} # Target repository name in JFrog
   JFROG_USERNAME: `${{ secrets.JFROG_USERNAME }}     # JFrog username
   JFROG_PASSWORD: `${{ secrets.JFROG_PASSWORD }}     # JFrog password or API token
-  
-  # Application-specific settings
-  APP_NAME: '$ProjectName'
-  APP_VERSION: `${{ github.run_number }}
-  
-  # Security scanning settings
+
+  # --- Application-specific settings ---
+  APP_NAME: '$ProjectName'                           # Your application name
+  APP_VERSION: `${{ github.run_number }}             # Auto-incrementing version from GitHub
+
+  # --- Security scanning tokens ---
   SONAR_TOKEN: `${{ secrets.SONAR_TOKEN }}           # SonarQube token for code analysis
   SNYK_TOKEN: `${{ secrets.SNYK_TOKEN }}             # Snyk token for vulnerability scanning
 
+# =============================================================================
+# JOBS
+# =============================================================================
 jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
     
     steps:
-      # Step 1: Checkout source code
+      # -----------------------------------------------------------------------
+      # STEP 1: Checkout source code from the repository
+      # -----------------------------------------------------------------------
+      # fetch-depth: 0 fetches all history (needed for SonarQube analysis)
+      # -----------------------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Fetch all history for better analysis
       
-      # Step 2: Setup build environment
+      # -----------------------------------------------------------------------
+      # STEP 2: Setup $Language SDK/runtime
+      # -----------------------------------------------------------------------
 $buildSteps
       
-      # Step 3: Restore dependencies
+      # -----------------------------------------------------------------------
+      # STEP 3: Restore/install project dependencies
+      # -----------------------------------------------------------------------
       - name: Restore dependencies
         shell: pwsh
         run: |
           Write-Host "Restoring project dependencies..." -ForegroundColor Cyan
 $( Get-RestoreCommand -Language $Language )
       
-      # Step 4: Build application
+      # -----------------------------------------------------------------------
+      # STEP 4: Build/compile the application
+      # -----------------------------------------------------------------------
       - name: Build application
         shell: pwsh
         run: |
           Write-Host "Building application in `$env:BUILD_CONFIGURATION mode..." -ForegroundColor Cyan
 $( Get-BuildCommand -Language $Language )
       
-      # Step 5: Run unit tests
+      # -----------------------------------------------------------------------
+      # STEP 5: Run unit tests
+      # -----------------------------------------------------------------------
 $testSteps
       
-      # Step 6: Code quality and security scanning
+      # -----------------------------------------------------------------------
+      # STEP 6: Security scanning (SonarQube + Snyk)
+      # -----------------------------------------------------------------------
 $scanSteps
       
-      # Step 7: Package application
+      # -----------------------------------------------------------------------
+      # STEP 7: Package application into a deployable zip
+      # -----------------------------------------------------------------------
       - name: Package application
         shell: pwsh
         run: |
@@ -110,7 +160,12 @@ $scanSteps
           
 $( Get-PackageCommand -Language $Language -ApplicationType $ApplicationType )
       
-      # Step 8: Publish to JFrog Artifactory
+      # -----------------------------------------------------------------------
+      # STEP 8: Publish package to JFrog Artifactory
+      # -----------------------------------------------------------------------
+      # Uploads the zip to JFrog for long-term artifact storage.
+      # The CD pipeline later downloads from JFrog to deploy.
+      # -----------------------------------------------------------------------
       - name: Publish to JFrog
         shell: pwsh
         run: |
@@ -136,6 +191,10 @@ $( Get-PackageCommand -Language $Language -ApplicationType $ApplicationType )
           Write-Host "✓ Artifacts published successfully" -ForegroundColor Green
       
       # Step 9: Upload build artifacts (backup)
+      # -----------------------------------------------------------------------
+      # Also uploads to GitHub Actions as a backup. Available in the workflow
+      # run's "Artifacts" tab. Retained for 30 days then auto-deleted.
+      # -----------------------------------------------------------------------
       - name: Upload artifacts to GitHub
         uses: actions/upload-artifact@v4
         with:
@@ -143,7 +202,12 @@ $( Get-PackageCommand -Language $Language -ApplicationType $ApplicationType )
           path: artifacts/
           retention-days: 30
       
-      # Step 10: Build summary
+      # -----------------------------------------------------------------------
+      # STEP 10: Build summary
+      # -----------------------------------------------------------------------
+      # Runs even if previous steps failed (if: always()) to always log
+      # a summary of what happened. Useful for troubleshooting.
+      # -----------------------------------------------------------------------
       - name: Build summary
         if: always()
         shell: pwsh
@@ -172,16 +236,44 @@ function Get-CDTemplate {
     $postDeploySteps = Get-PostDeploymentSteps -DeploymentType $DeploymentType -ApplicationType $ApplicationType
     
     $template = @"
-# CD Pipeline Template
-# Generated for: $ApplicationType ($Language) -> $DeploymentType
-# Project: $ProjectName
-# Description: Deploy application to $DeploymentType
+# =============================================================================
+# LEGACY CD PIPELINE — $DeploymentType Deployment
+# =============================================================================
+#
+# PROJECT: $ProjectName
+# APP TYPE: $ApplicationType ($Language)
+#
+# PURPOSE:
+#   This is a standalone (legacy) CD pipeline that downloads artifacts from
+#   JFrog and deploys them to $DeploymentType. It is triggered manually via
+#   the GitHub Actions UI (workflow_dispatch).
+#
+# NOTE:
+#   For new projects, prefer the reusable workflow approach (build.yml +
+#   reusable-cd-*.yml). This legacy template is provided for backward
+#   compatibility with existing pipelines.
+#
+# PIPELINE STEPS:
+#   1. Checkout repository (for deployment scripts)
+#   2. Download artifacts from JFrog
+#   3. Pre-deployment validation
+#   4. Deploy to $DeploymentType
+#   5. Post-deployment health check
+#   6. Deployment summary
+# =============================================================================
 
 name: CD - Deploy to $DeploymentType
 
+# ---------------------------------------------------------------------------
+# TRIGGER: Manual only (workflow_dispatch)
+# ---------------------------------------------------------------------------
+# This workflow must be triggered manually from the GitHub Actions UI.
+# The user selects the target environment and version to deploy.
+# ---------------------------------------------------------------------------
 on:
   workflow_dispatch:
     inputs:
+      # Which environment to deploy to (maps to GitHub Environments)
       environment:
         description: 'Target Environment'
         required: true
@@ -190,42 +282,57 @@ on:
           - development
           - staging
           - production
+      # The build version/number to deploy (must exist in JFrog)
       version:
         description: 'Version to deploy (build number or tag)'
         required: true
         type: string
+      # Emergency flag to skip health checks
       skip_health_check:
         description: 'Skip post-deployment health check'
         required: false
         type: boolean
         default: false
 
-# Environment variables - customize these for your project
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
 env:
-  # Application settings
-  APP_NAME: '$ProjectName'
-  APP_VERSION: `${{ inputs.version }}
-  TARGET_ENV: `${{ inputs.environment }}
-  
-  # JFrog Artifactory settings
-  JFROG_URL: `${{ secrets.JFROG_URL }}
-  JFROG_REPOSITORY: `${{ secrets.JFROG_REPOSITORY }}
-  JFROG_USERNAME: `${{ secrets.JFROG_USERNAME }}
-  JFROG_PASSWORD: `${{ secrets.JFROG_PASSWORD }}
+  # --- Application settings ---
+  APP_NAME: '$ProjectName'                            # Application name
+  APP_VERSION: `${{ inputs.version }}                 # Version selected by the user
+  TARGET_ENV: `${{ inputs.environment }}              # Target environment
 
-# Deployment jobs with environment-specific configuration
+  # --- JFrog Artifactory settings ---
+  JFROG_URL: `${{ secrets.JFROG_URL }}               # JFrog base URL
+  JFROG_REPOSITORY: `${{ secrets.JFROG_REPOSITORY }} # JFrog repository name
+  JFROG_USERNAME: `${{ secrets.JFROG_USERNAME }}     # JFrog username
+  JFROG_PASSWORD: `${{ secrets.JFROG_PASSWORD }}     # JFrog password/API token
+
+# =============================================================================
+# JOBS
+# =============================================================================
 jobs:
   deploy:
     name: Deploy to `${{ inputs.environment }}
     runs-on: $( if ($DeploymentType -eq 'IIS') { 'windows-latest' } else { 'ubuntu-latest' } )
     
-    # Configure environment protection rules
+    # -------------------------------------------------------------------------
+    # ENVIRONMENT PROTECTION
+    # -------------------------------------------------------------------------
+    # Links this job to a GitHub Environment. If protection rules are
+    # configured (required reviewers, wait timers), the job pauses here.
+    # -------------------------------------------------------------------------
     environment:
       name: `${{ inputs.environment }}
       url: `${{ steps.deploy.outputs.app_url }}
     
     steps:
-      # Step 1: Checkout repository (for scripts and configurations)
+      # -----------------------------------------------------------------------
+      # STEP 1: Checkout repository
+      # -----------------------------------------------------------------------
+      # Only checks out deployment/ and scripts/ folders to speed up checkout.
+      # -----------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
@@ -233,13 +340,17 @@ jobs:
             deployment/
             scripts/
       
-      # Step 2: Download artifacts from JFrog
+      # -----------------------------------------------------------------------
+      # STEP 2: Download artifacts from JFrog Artifactory
+      # -----------------------------------------------------------------------
+      # Downloads the build package (zip) published by the CI pipeline.
+      # -----------------------------------------------------------------------
       - name: Download artifacts from JFrog
         shell: $( if ($DeploymentType -eq 'IIS') { 'pwsh' } else { 'pwsh' } )
         run: |
           Write-Host "Downloading artifacts from JFrog Artifactory..." -ForegroundColor Cyan
           
-          # Install JFrog CLI if not present
+          # Install JFrog CLI if not present on the runner
           if (-not (Get-Command jfrog -ErrorAction SilentlyContinue)) {
             Write-Host "Installing JFrog CLI..." -ForegroundColor Yellow
 $( if ($DeploymentType -eq 'IIS') {

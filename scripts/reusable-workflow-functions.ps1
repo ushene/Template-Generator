@@ -86,101 +86,211 @@ function Get-ReusableCIWorkflow {
     $langLower = $Language -replace '\.', ''
     
     $template = @"
-# Reusable CI Workflow
-# Language: $Language
-# Purpose: Build, test, scan, and publish artifacts to JFrog
-# This workflow can be called from other workflows using workflow_call
+# =============================================================================
+# REUSABLE CI WORKFLOW — $Language
+# =============================================================================
+#
+# PURPOSE:
+#   This is a reusable CI (Continuous Integration) workflow for $Language projects.
+#   It handles the entire build pipeline: compile, test, scan for vulnerabilities,
+#   package, and publish artifacts to JFrog Artifactory.
+#
+# HOW IT WORKS:
+#   This file is NOT triggered directly by a push or PR.
+#   Instead, it is CALLED by the main orchestrator workflow (build.yml) using
+#   the 'workflow_call' trigger. The orchestrator passes in all the app-specific
+#   values (app name, paths, versions) as inputs and secrets.
+#
+# REUSABILITY:
+#   Because all values are parameterized (passed in via inputs), this same
+#   workflow can be reused across multiple $Language projects without modification.
+#   Just change the inputs in the calling workflow (build.yml).
+#
+# PIPELINE STEPS:
+#   1. Checkout code from repository
+#   2. Set version number from GitHub run number
+#   3. Setup $Language SDK/runtime
+#   4. Restore/install dependencies
+#   5. Build/compile the application
+#   6. Run unit tests (skippable)
+#   7. Run security scans — SonarQube + Snyk (skippable)
+#   8. Package the application into a zip file
+#   9. Publish the zip to JFrog Artifactory
+#  10. Upload artifacts to GitHub as backup
+#  11. Report build status
+# =============================================================================
 
 name: Reusable CI - $Language
 
+# ---------------------------------------------------------------------------
+# TRIGGER: workflow_call
+# ---------------------------------------------------------------------------
+# This workflow is triggered when ANOTHER workflow calls it using:
+#   uses: ./.github/workflows/reusable-ci-$langLower.yml
+# The calling workflow must provide the required inputs and secrets below.
+# ---------------------------------------------------------------------------
 on:
   workflow_call:
+
+    # =========================================================================
+    # INPUTS — Values passed in by the calling workflow (build.yml)
+    # =========================================================================
+    # These make the workflow reusable. The orchestrator (build.yml) provides
+    # all app-specific values here so this file stays generic.
+    # =========================================================================
     inputs:
+      # The name of your application (used for artifact naming and logging)
       app-name:
         description: 'Application name'
         required: true
         type: string
+
+      # Build configuration — typically 'Release' for CI, 'Debug' for local dev
       build-configuration:
         description: 'Build configuration (Release/Debug)'
         required: false
         type: string
         default: 'Release'
+
+      # $Language SDK/runtime version to install on the build agent
       `$( $versionInputName ):\n        description: '$Language SDK/Runtime version'
         required: false
         type: string
         default: `$( if ($Language -eq '.NET') { "'8.x'" } elseif ($Language -eq 'Python') { "'3.11'" } else { "'20'" } )
+
+      # Set to true to skip unit tests (useful for emergency hotfix deploys)
       skip-tests:
         description: 'Skip running tests'
         required: false
         type: boolean
         default: false
+
+      # Set to true to skip Snyk/SonarQube security scanning
       skip-security-scan:
         description: 'Skip security scanning'
         required: false
         type: boolean
         default: false
+
+      # Which GitHub-hosted runner to use (default: ubuntu-latest)
       runner:
         description: 'GitHub runner to use'
         required: false
         type: string
         default: 'ubuntu-latest'
+
+      # JFrog Artifactory repository name to publish build artifacts to
+      # If empty, the JFrog publish step is skipped
       jfrog-repository:
         description: 'JFrog repository name'
         required: false
         type: string
         default: ''
-    
+
+    # =========================================================================
+    # OUTPUTS — Values this workflow sends BACK to the calling workflow
+    # =========================================================================
+    # The orchestrator (build.yml) can read these outputs to pass version info
+    # to downstream jobs like deployment.
+    # =========================================================================
     outputs:
+      # The build version number (matches GitHub run number)
       artifact-version:
         description: 'Version of the built artifact'
         value: `${{ jobs.build.outputs.version }}
+      # The full artifact name (e.g., "MyApp-42")
       artifact-name:
         description: 'Name of the artifact'
         value: `${{ jobs.build.outputs.artifact }}
+      # Whether the build succeeded or failed
       build-status:
         description: 'Build status (success/failure)'
         value: `${{ jobs.build.outputs.status }}
-    
+
+    # =========================================================================
+    # SECRETS — Sensitive values passed in by the calling workflow
+    # =========================================================================
+    # These are stored in GitHub Settings → Secrets and passed through by
+    # the orchestrator using 'secrets: inherit' or explicit mapping.
+    # =========================================================================
     secrets:
+      # JFrog Artifactory base URL (e.g., https://yourcompany.jfrog.io)
       JFROG_URL:
         description: 'JFrog Artifactory URL'
         required: true
+      # JFrog authentication username
       JFROG_USERNAME:
         description: 'JFrog username'
         required: true
+      # JFrog authentication password or API token (API token recommended)
       JFROG_PASSWORD:
         description: 'JFrog password or API token'
         required: true
+      # SonarQube token for code quality analysis (optional — leave empty to skip)
       SONAR_TOKEN:
         description: 'SonarQube token'
         required: false
+      # Snyk token for security vulnerability scanning (optional — leave empty to skip)
       SNYK_TOKEN:
         description: 'Snyk token'
         required: false
 
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+# These env vars are available to ALL steps in this workflow.
+# They pull their values from the inputs provided by the calling workflow.
+# =============================================================================
 env:
+  # Build mode: Release (optimized) or Debug (with symbols)
   BUILD_CONFIGURATION: `${{ inputs.build-configuration }}
+  # Application name — used in artifact naming and log messages
   APP_NAME: `${{ inputs.app-name }}
+  # Version number — GitHub auto-increments run_number on every workflow run
   APP_VERSION: `${{ github.run_number }}
 
+# =============================================================================
+# JOBS
+# =============================================================================
+# This workflow has a single job: 'build'
+# It runs all CI steps sequentially on the specified runner.
+# =============================================================================
 jobs:
   build:
     name: Build and Test
+    # Run on the specified GitHub-hosted runner (default: ubuntu-latest)
     runs-on: `${{ inputs.runner }}
-    
+
+    # -------------------------------------------------------------------------
+    # JOB OUTPUTS — Values passed back to the calling workflow
+    # -------------------------------------------------------------------------
+    # These are set by steps below using GITHUB_OUTPUT, and can be read by
+    # downstream jobs (e.g., deployment) in the orchestrator workflow.
+    # -------------------------------------------------------------------------
     outputs:
       version: `${{ steps.set-version.outputs.version }}
       artifact: `${{ steps.set-version.outputs.artifact }}
       status: `${{ steps.set-status.outputs.status }}
-    
+
     steps:
-      # Step 1: Checkout source code
+      # -----------------------------------------------------------------------
+      # STEP 1: Checkout source code from the repository
+      # -----------------------------------------------------------------------
+      # fetch-depth: 0 means fetch ALL commit history (not just the latest).
+      # This is needed for tools like SonarQube that analyze commit history.
+      # -----------------------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
-      # Step 2: Set version output
+
+      # -----------------------------------------------------------------------
+      # STEP 2: Set version output variables
+      # -----------------------------------------------------------------------
+      # Creates a version string from the GitHub run number and writes it to
+      # GITHUB_OUTPUT so the calling workflow can read it (e.g., for deployment).
+      # Example: version=42, artifact=MyApp-42
+      # -----------------------------------------------------------------------
       - name: Set version
         id: set-version
         shell: pwsh
@@ -190,41 +300,64 @@ jobs:
           "version=`$version" | Out-File -FilePath `$env:GITHUB_OUTPUT -Append -Encoding utf8
           "artifact=`$artifact" | Out-File -FilePath `$env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Building version: `$version" -ForegroundColor Cyan
-      
-      # Step 3: Setup build environment
+
+      # -----------------------------------------------------------------------
+      # STEP 3: Setup $Language SDK/Runtime
+      # -----------------------------------------------------------------------
+      # Installs the specified version of $Language on the build agent.
+      # The version comes from the input parameter (e.g., '8.x' for .NET).
+      # -----------------------------------------------------------------------
       - name: Setup $Language
         uses: $( if ($Language -eq '.NET') { 'actions/setup-dotnet@v4' } elseif ($Language -eq 'Python') { 'actions/setup-python@v5' } else { 'actions/setup-node@v4' } )
         with:
           $buildSteps
-      
+
+      # Log the installed version for troubleshooting
       - name: Display $Language version
         shell: pwsh
         run: |
           Write-Host "$Language Version:" -ForegroundColor Cyan
           $( if ($Language -eq '.NET') { 'dotnet --version' } elseif ($Language -eq 'Python') { 'python --version' } else { 'node --version' } )
-      
-      # Step 4: Restore dependencies
+
+      # -----------------------------------------------------------------------
+      # STEP 4: Restore/install project dependencies
+      # -----------------------------------------------------------------------
+      # Downloads all packages/libraries the project needs to build.
+      # This must run BEFORE the build step.
+      # -----------------------------------------------------------------------
       - name: Restore dependencies
         shell: pwsh
         run: |
           Write-Host "Restoring project dependencies..." -ForegroundColor Cyan
           $restoreCommand
-      
-      # Step 5: Build application
+
+      # -----------------------------------------------------------------------
+      # STEP 5: Build/compile the application
+      # -----------------------------------------------------------------------
+      # Compiles the source code in the specified configuration (Release/Debug).
+      # --no-restore: skips restoring again since we already did it above.
+      # -----------------------------------------------------------------------
       - name: Build application
         shell: pwsh
         run: |
           Write-Host "Building application in `$env:BUILD_CONFIGURATION mode..." -ForegroundColor Cyan
           $buildCommand
-      
-      # Step 6: Run unit tests
+
+      # -----------------------------------------------------------------------
+      # STEP 6: Run unit tests
+      # -----------------------------------------------------------------------
+      # Executes the project's unit tests. Skipped if 'skip-tests' input is true.
+      # Test results are uploaded as artifacts for review in the GitHub Actions UI.
+      # -----------------------------------------------------------------------
       - name: Run unit tests
         if: `${{ !inputs.skip-tests }}
         shell: pwsh
         run: |
           Write-Host "Running unit tests..." -ForegroundColor Cyan
           $testCommand
-      
+
+      # Upload test results even if tests fail (if: always()) so you can
+      # inspect failures in the GitHub Actions artifacts tab.
       - name: Publish test results
         if: always() && !inputs.skip-tests
         uses: actions/upload-artifact@v4
@@ -235,8 +368,16 @@ jobs:
             coverage.xml
             htmlcov/
             coverage/
-      
-      # Step 7: Security scanning
+
+      # -----------------------------------------------------------------------
+      # STEP 7: Security scanning — SonarQube + Snyk
+      # -----------------------------------------------------------------------
+      # SonarQube: Analyzes code quality (bugs, code smells, duplication).
+      #   Only runs if SONAR_TOKEN secret is configured.
+      # Snyk: Scans dependencies for known security vulnerabilities.
+      #   Only runs if SNYK_TOKEN secret is configured.
+      # Both are skipped if 'skip-security-scan' input is true.
+      # -----------------------------------------------------------------------
       - name: Run SonarQube analysis
         if: `${{ !inputs.skip-security-scan && secrets.SONAR_TOKEN != '' }}
         shell: pwsh
@@ -246,6 +387,12 @@ jobs:
       
       $( if ($Language -eq '.NET') {
           @'
+      # Snyk scans .NET projects by reading obj/project.assets.json
+      # which is created during 'dotnet restore'. It checks all NuGet
+      # packages for known security vulnerabilities.
+      # --severity-threshold=high: only fail on high/critical vulnerabilities
+      # || true: don't fail the build if vulnerabilities are found (report only)
+      # snyk monitor: sends results to Snyk dashboard for ongoing monitoring
       - name: Run Snyk security scan
         if: `${{ !inputs.skip-security-scan && secrets.SNYK_TOKEN != '' }}
         shell: pwsh
@@ -263,6 +410,10 @@ jobs:
 '@
         } elseif ($Language -eq 'Python') {
           @'
+      # Snyk scans Python projects by reading requirements.txt to find
+      # all pip packages and check them for known security vulnerabilities.
+      # --severity-threshold=high: only fail on high/critical vulnerabilities
+      # || true: don't fail the build if vulnerabilities are found (report only)
       - name: Run Snyk security scan
         if: `${{ !inputs.skip-security-scan && secrets.SNYK_TOKEN != '' }}
         shell: pwsh
@@ -273,6 +424,7 @@ jobs:
           Write-Host "Running Snyk security vulnerability scan..." -ForegroundColor Cyan
           npm install -g snyk
           snyk auth $env:SNYK_TOKEN
+          # Find the requirements.txt file to scan
           $reqFile = Get-ChildItem -Path . -Filter requirements.txt -Recurse -File | Select-Object -First 1
           if (-not $reqFile) {
             Write-Host "No requirements.txt file found in $(Get-Location). Skipping Snyk scan." -ForegroundColor Yellow
@@ -284,6 +436,10 @@ jobs:
 '@
         } elseif ($Language -eq 'Node') {
           @'
+      # Snyk scans Node.js projects by reading package.json/package-lock.json
+      # to find all npm packages and check them for known security vulnerabilities.
+      # --severity-threshold=high: only fail on high/critical vulnerabilities
+      # || true: don't fail the build if vulnerabilities are found (report only)
       - name: Run Snyk security scan
         if: `${{ !inputs.skip-security-scan && secrets.SNYK_TOKEN != '' }}
         shell: pwsh
@@ -294,6 +450,7 @@ jobs:
           Write-Host "Running Snyk security vulnerability scan..." -ForegroundColor Cyan
           npm install -g snyk
           snyk auth $env:SNYK_TOKEN
+          # Find the package.json file to scan
           $pkgFile = Get-ChildItem -Path . -Filter package.json -Recurse -File | Select-Object -First 1
           if (-not $pkgFile) {
             Write-Host "No package.json file found in $(Get-Location). Skipping Snyk scan." -ForegroundColor Yellow
@@ -305,6 +462,9 @@ jobs:
 '@
         } else {
           @'
+      # Snyk scans for known security vulnerabilities in project dependencies.
+      # --severity-threshold=high: only fail on high/critical vulnerabilities
+      # || true: don't fail the build if vulnerabilities are found (report only)
       - name: Run Snyk security scan
         if: `${{ !inputs.skip-security-scan && secrets.SNYK_TOKEN != '' }}
         shell: pwsh
@@ -318,8 +478,14 @@ jobs:
           snyk monitor
 '@
         } )
-      
-      # Step 8: Package application
+
+      # -----------------------------------------------------------------------
+      # STEP 8: Package the application
+      # -----------------------------------------------------------------------
+      # Creates a deployable zip file from the build output.
+      # The zip is stored in the 'artifacts/' folder for upload to JFrog
+      # and GitHub. Package name format: AppName-Version.zip
+      # -----------------------------------------------------------------------
       - name: Package application
         shell: pwsh
         run: |
@@ -327,40 +493,60 @@ jobs:
           `$packageName = "`$env:APP_NAME-`$env:APP_VERSION"
           $packageCommand
           Write-Host "✓ Package created: artifacts/`$packageName.zip" -ForegroundColor Green
-      
-      # Step 9: Publish to JFrog Artifactory
+
+      # -----------------------------------------------------------------------
+      # STEP 9: Publish artifacts to JFrog Artifactory
+      # -----------------------------------------------------------------------
+      # Uploads the packaged zip to JFrog Artifactory for long-term storage.
+      # JFrog serves as the single source of truth for deployment artifacts.
+      # The CD workflow later downloads from JFrog to deploy.
+      # Skipped if jfrog-repository input is empty.
+      # Target path: {repository}/{app-name}/{version}/
+      # -----------------------------------------------------------------------
       - name: Publish to JFrog
         if: inputs.jfrog-repository != ''
         shell: pwsh
         run: |
           Write-Host "Publishing artifacts to JFrog Artifactory..." -ForegroundColor Cyan
-          
-          # Setup JFrog CLI
+
+          # Install JFrog CLI if not already available on the runner
           if (-not (Get-Command jfrog -ErrorAction SilentlyContinue)) {
             Write-Host "Installing JFrog CLI..." -ForegroundColor Yellow
             curl -fL https://install-cli.jfrog.io | sh
             sudo mv jfrog /usr/local/bin/
           }
-          
-          # Configure JFrog CLI
+
+          # Configure JFrog CLI with credentials from secrets
           jfrog config add artifactory --url="`${{ secrets.JFROG_URL }}" --user="`${{ secrets.JFROG_USERNAME }}" --password="`${{ secrets.JFROG_PASSWORD }}" --interactive=false
-          
-          # Upload artifacts
+
+          # Upload all files in artifacts/ to JFrog under {repo}/{app}/{version}/
           `$targetPath = "`${{ inputs.jfrog-repository }}/`$env:APP_NAME/`$env:APP_VERSION/"
           Write-Host "Uploading to `$targetPath" -ForegroundColor Cyan
           jfrog rt upload "artifacts/*" "`$targetPath" --flat=false --recursive=true
-          
+
           Write-Host "✓ Artifacts published successfully" -ForegroundColor Green
-      
-      # Step 10: Upload build artifacts to GitHub
+
+      # -----------------------------------------------------------------------
+      # STEP 10: Upload build artifacts to GitHub (backup)
+      # -----------------------------------------------------------------------
+      # Also uploads artifacts to GitHub Actions as a backup.
+      # These are available in the workflow run's "Artifacts" section.
+      # retention-days: 30 means GitHub deletes them after 30 days.
+      # -----------------------------------------------------------------------
       - name: Upload artifacts to GitHub
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts-`${{ inputs.app-name }}-`${{ github.run_number }}
           path: artifacts/
           retention-days: 30
-      
-      # Step 11: Set build status
+
+      # -----------------------------------------------------------------------
+      # STEP 11: Set final build status
+      # -----------------------------------------------------------------------
+      # Records the final job status (success/failure/cancelled) as an output
+      # so the orchestrator workflow can read it. Runs even if previous steps
+      # failed (if: always()) to ensure status is always reported.
+      # -----------------------------------------------------------------------
       - name: Set build status
         id: set-status
         if: always()
@@ -393,29 +579,49 @@ function Get-ReusableCDWorkflow {
     switch ($DeploymentType) {
         'Azure' {
             $preDeploySteps = @'
+      # -----------------------------------------------------------------------
+      # Pre-deploy: Authenticate to Azure using a service principal
+      # -----------------------------------------------------------------------
+      # Uses az login with service principal credentials (client ID + secret).
+      # Then sets the active subscription so all subsequent az commands
+      # target the correct Azure environment.
+      # -----------------------------------------------------------------------
       - name: Azure Login
         shell: pwsh
         run: |
           Write-Host "Logging in to Azure..." -ForegroundColor Cyan
+          # Login using service principal (non-interactive, suitable for CI/CD)
           az login --service-principal -u ${{ secrets.AZURE_CLIENT_ID }} -p ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
+          # Set the active subscription to ensure we deploy to the right one
           az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
           Write-Host "✓ Azure login successful" -ForegroundColor Green
 '@
             
             $deploySteps = @'
+      # -----------------------------------------------------------------------
+      # Deploy: Upload the application package to Azure
+      # -----------------------------------------------------------------------
+      # Determines the resource type (webapp or functionapp) and deploys
+      # accordingly. For web apps, also validates that the Azure runtime
+      # matches the package target framework to prevent mismatches.
+      # After deploy, retrieves the app URL and saves it as a step output.
+      # -----------------------------------------------------------------------
       - name: Deploy to Azure
         id: deploy
         shell: pwsh
         run: |
           Write-Host "Deploying to Azure..." -ForegroundColor Cyan
           
-          # Deploy based on resource type
+          # Check if deploying to a webapp or functionapp
           $resourceType = "${{ inputs.resource-type }}"
           
           if ($resourceType -eq "webapp") {
+            # Find the deployment zip file in the artifacts folder
             $zipFile = Get-ChildItem -Path "artifacts" -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
             if (-not $zipFile) { throw "No deployment package found in artifacts folder" }
             
+            # SAFETY CHECK: Verify the App Service runtime matches our package
+            # This prevents deploying a .NET 8 app to a .NET 6 App Service, etc.
             $linuxFxVersion = az webapp config show `
               --resource-group ${{ inputs.resource-group }} `
               --name ${{ inputs.resource-name }} `
@@ -426,6 +632,7 @@ function Get-ReusableCDWorkflow {
               throw "App Service runtime '$linuxFxVersion' does not match this package target framework (net8.0). Set the web app runtime to DOTNETCORE|8.0 or retarget the app."
             }
             
+            # Deploy the zip package using az webapp deploy (zip deploy)
             Write-Host "Uploading package with az webapp deploy..." -ForegroundColor Yellow
             az webapp deploy `
               --resource-group `${{ inputs.resource-group }} `
@@ -433,7 +640,8 @@ function Get-ReusableCDWorkflow {
               --src-path "`$zipFile" `
               --type zip `
               --track-status false
-              
+            
+            # Retrieve the deployed app's URL and save as step output
             $appUrl = az webapp show `
               --resource-group ${{ inputs.resource-group }} `
               --name ${{ inputs.resource-name }} `
@@ -442,13 +650,15 @@ function Get-ReusableCDWorkflow {
             "app_url=https://$appUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
           elseif ($resourceType -eq "functionapp") {
+            # For Function Apps, use config-zip deployment
             $zipFile = Get-ChildItem -Path "artifacts" -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
             if (-not $zipFile) { throw "No deployment package found in artifacts folder" }
             az functionapp deployment source config-zip `
               --resource-group ${{ inputs.resource-group }} `
               --name ${{ inputs.resource-name }} `
               --src "$zipFile"
-              
+            
+            # Retrieve the Function App's URL and save as step output
             $appUrl = az functionapp show `
               --resource-group ${{ inputs.resource-group }} `
               --name ${{ inputs.resource-name }} `
@@ -462,39 +672,59 @@ function Get-ReusableCDWorkflow {
         }
         'AKS' {
             $preDeploySteps = @'
+      # -----------------------------------------------------------------------
+      # Pre-deploy: Connect to Azure Kubernetes Service (AKS)
+      # -----------------------------------------------------------------------
+      # Authenticates to Azure, then downloads AKS cluster credentials
+      # so kubectl can communicate with the Kubernetes cluster.
+      # -----------------------------------------------------------------------
       - name: Setup Kubernetes
         shell: pwsh
         run: |
           Write-Host "Setting up Kubernetes..." -ForegroundColor Cyan
+          # Login to Azure using service principal
           az login --service-principal -u ${{ secrets.AZURE_CLIENT_ID }} -p ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
+          # Download AKS credentials into ~/.kube/config
           az aks get-credentials --resource-group ${{ inputs.aks-resource-group }} --name ${{ inputs.aks-cluster-name }}
+          # Verify we can talk to the cluster
           kubectl cluster-info
           Write-Host "✓ Kubernetes setup complete" -ForegroundColor Green
 '@
             
             $deploySteps = @'
+      # -----------------------------------------------------------------------
+      # Deploy: Build Docker image, push to ACR, update AKS deployment
+      # -----------------------------------------------------------------------
+      # 1. Builds a Docker image tagged with the version number
+      # 2. Pushes it to Azure Container Registry (ACR)
+      # 3. Updates the Kubernetes deployment to use the new image
+      # 4. Waits for the rollout to complete (up to 5 minutes)
+      # 5. Retrieves the service's external IP as the app URL
+      # -----------------------------------------------------------------------
       - name: Deploy to AKS
         id: deploy
         shell: pwsh
         run: |
           Write-Host "Deploying to Azure Kubernetes Service..." -ForegroundColor Cyan
           
-          # Build and push Docker image
+          # Build Docker image with ACR-compatible tag
           docker build -t ${{ inputs.acr-name }}.azurecr.io/${{ inputs.app-name }}:${{ inputs.version }} .
           
-          # Login to ACR
+          # Authenticate to Azure Container Registry
           echo ${{ secrets.ACR_PASSWORD }} | docker login ${{ inputs.acr-name }}.azurecr.io -u ${{ inputs.acr-username }} --password-stdin
           
-          # Push image
+          # Push image to ACR so AKS can pull it
           docker push ${{ inputs.acr-name }}.azurecr.io/${{ inputs.app-name }}:${{ inputs.version }}
           
-          # Update deployment
+          # Tell Kubernetes to update the deployment with the new image
           kubectl set image deployment/${{ inputs.app-name }} `
             ${{ inputs.app-name }}=${{ inputs.acr-name }}.azurecr.io/${{ inputs.app-name }}:${{ inputs.version }} `
             -n ${{ inputs.kubernetes-namespace }}
           
+          # Wait for all pods to be updated (timeout: 5 minutes)
           kubectl rollout status deployment/${{ inputs.app-name }} -n ${{ inputs.kubernetes-namespace }} --timeout=300s
           
+          # Get the external IP of the service for health checks
           $serviceIP = kubectl get service ${{ inputs.app-name }} -n ${{ inputs.kubernetes-namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
           "app_url=http://$serviceIP" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           
@@ -503,51 +733,79 @@ function Get-ReusableCDWorkflow {
         }
         'IIS' {
             $preDeploySteps = @'
+      # -----------------------------------------------------------------------
+      # Pre-deploy: Validate connectivity to the IIS server
+      # -----------------------------------------------------------------------
+      # Tests that the build agent can reach the IIS server on port 5985
+      # (WinRM). If this fails, the deployment will not proceed.
+      # -----------------------------------------------------------------------
       - name: Validate IIS Connection
         shell: pwsh
         run: |
           Write-Host "Validating IIS server connection..." -ForegroundColor Cyan
+          # Test WinRM connectivity (port 5985) to the IIS server
           Test-NetConnection -ComputerName ${{ inputs.iis-server }} -Port 5985 -InformationLevel Detailed
           Write-Host "✓ Connection validated" -ForegroundColor Green
 '@
             
             $deploySteps = @'
+      # -----------------------------------------------------------------------
+      # Deploy: Remote deploy to IIS via PowerShell Remoting (WinRM)
+      # -----------------------------------------------------------------------
+      # 1. Creates a PS remoting session to the IIS server
+      # 2. Copies the zip package to the server
+      # 3. Stops the app pool (so files aren't locked)
+      # 4. Backs up the current deployment
+      # 5. Extracts the new package to the site's physical path
+      # 6. Restarts the app pool and verifies the site is running
+      # -----------------------------------------------------------------------
       - name: Deploy to IIS
         id: deploy
         shell: pwsh
         run: |
           Write-Host "Deploying to IIS..." -ForegroundColor Cyan
           
+          # Create credentials for remote connection
           $securePassword = ConvertTo-SecureString ${{ secrets.IIS_PASSWORD }} -AsPlainText -Force
           $credential = New-Object System.Management.Automation.PSCredential (${{ secrets.IIS_USERNAME }}, $securePassword)
           
+          # Open a remote PowerShell session to the IIS server
           $session = New-PSSession -ComputerName ${{ inputs.iis-server }} -Credential $credential
           
+          # Copy the deployment zip to the remote server's temp folder
           Copy-Item -Path "artifacts/*.zip" -Destination "C:\Temp\" -ToSession $session
           
+          # Execute the deployment on the remote server
           Invoke-Command -Session $session -ScriptBlock {
             param($appName, $siteName, $appPool, $deployPath, $version)
             
             Import-Module WebAdministration
+            
+            # Stop the app pool so deployed files are not locked
             Stop-WebAppPool -Name $appPool
             Start-Sleep -Seconds 5
             
+            # Backup current deployment before overwriting
             if (Test-Path $deployPath) {
               $backupPath = "$deployPath-backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
               Copy-Item -Path $deployPath -Destination $backupPath -Recurse -Force
             }
             
+            # Remove old files and extract new package
             Remove-Item -Path $deployPath\* -Recurse -Force -ErrorAction SilentlyContinue
             Expand-Archive -Path "C:\Temp\$appName-$version.zip" -DestinationPath $deployPath -Force
             
+            # Restart the app pool
             Start-WebAppPool -Name $appPool
             
+            # Make sure the website itself is started
             $site = Get-Website -Name $siteName
             if ($site.State -ne 'Started') {
               Start-Website -Name $siteName
             }
           } -ArgumentList "${{ inputs.app-name }}", "${{ inputs.iis-site-name }}", "${{ inputs.iis-app-pool }}", "${{ inputs.iis-deploy-path }}", "${{ inputs.version }}"
           
+          # Clean up the remote session
           Remove-PSSession $session
           
           "app_url=http://${{ inputs.iis-server }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -557,52 +815,103 @@ function Get-ReusableCDWorkflow {
     }
     
     $template = @"
-# Reusable CD Workflow
-# Deployment Type: $DeploymentType
-# Purpose: Deploy application to $DeploymentType
-# This workflow can be called from other workflows using workflow_call
+# =============================================================================
+# REUSABLE CD WORKFLOW — $DeploymentType Deployment
+# =============================================================================
+#
+# PURPOSE:
+#   This is a reusable CD (Continuous Deployment) workflow that deploys
+#   applications to $DeploymentType. It handles artifact download from JFrog,
+#   deployment, and post-deployment health checks.
+#
+# HOW IT WORKS:
+#   This file is NOT triggered directly by a push or PR.
+#   Instead, it is CALLED by the main orchestrator workflow (build.yml) using
+#   the 'workflow_call' trigger. The orchestrator passes environment-specific
+#   values (resource group, resource name, etc.) as inputs.
+#
+# REUSABILITY:
+#   Because all values are parameterized, this same workflow can deploy to
+#   development, staging, or production — the orchestrator just passes
+#   different input values for each environment.
+#
+# PIPELINE STEPS:
+#   1. Checkout repository (for any deployment scripts)
+#   2. Download artifacts from JFrog Artifactory
+#   3. Authenticate to $DeploymentType
+#   4. Deploy the application
+#   5. Run health checks to verify deployment succeeded
+#   6. Report deployment status
+# =============================================================================
 
 name: Reusable CD - $DeploymentType
 
+# ---------------------------------------------------------------------------
+# TRIGGER: workflow_call
+# ---------------------------------------------------------------------------
+# This workflow is triggered when ANOTHER workflow calls it using:
+#   uses: ./.github/workflows/reusable-cd-$($DeploymentType.ToLower()).yml
+# The calling workflow must provide the required inputs and secrets below.
+# ---------------------------------------------------------------------------
 on:
   workflow_call:
+
+    # =========================================================================
+    # INPUTS — Values passed in by the calling workflow (build.yml)
+    # =========================================================================
     inputs:
+      # The name of the application being deployed (used in JFrog path and logging)
       app-name:
         description: 'Application name'
         required: true
         type: string
+
+      # The version/build number to deploy (used to locate the artifact in JFrog)
       version:
         description: 'Version to deploy'
         required: true
         type: string
+
+      # Target environment name — must match a GitHub Environment (development/staging/production)
       environment:
         description: 'Target environment'
         required: true
         type: string
+
+      # Set to true to skip health checks after deployment
       skip-health-check:
         description: 'Skip post-deployment health check'
         required: false
         type: boolean
         default: false
+
+      # Which GitHub-hosted runner to use for deployment
       runner:
         description: 'GitHub runner to use'
         required: false
         type: string
         default: '$runnerOS'
+
+      # JFrog Artifactory repository where build artifacts are stored
       jfrog-repository:
         description: 'JFrog repository name'
         required: true
         type: string
+
+      # --- Deployment target-specific inputs ---
       $( if ($DeploymentType -eq 'Azure') {
 @"
-resource-group:
+# Azure resource group containing the App Service or Function App
+      resource-group:
         description: 'Azure resource group'
         required: true
         type: string
+      # Azure resource name (App Service or Function App name)
       resource-name:
         description: 'Azure resource name'
         required: true
         type: string
+      # Type of Azure resource: 'webapp' for App Service, 'functionapp' for Functions
       resource-type:
         description: 'Azure resource type (webapp/functionapp)'
         required: false
@@ -611,14 +920,17 @@ resource-group:
 "@
       } elseif ($DeploymentType -eq 'AKS') {
 @"
-aks-cluster-name:
+# Name of the AKS cluster to deploy to
+      aks-cluster-name:
         description: 'AKS cluster name'
         required: true
         type: string
+      # Resource group containing the AKS cluster
       aks-resource-group:
         description: 'AKS resource group'
         required: true
         type: string
+      # Azure Container Registry name (where Docker images are stored)
       acr-name:
         description: 'Azure Container Registry name'
         required: true
@@ -654,27 +966,39 @@ iis-server:
 "@
       } )
     
+    # =========================================================================
+    # OUTPUTS — Values this workflow sends BACK to the calling workflow
+    # =========================================================================
     outputs:
+      # The URL of the deployed application (retrieved after deployment)
       deployment-url:
         description: 'URL of the deployed application'
         value: `${{ jobs.deploy.outputs.url }}
+      # Whether the deployment succeeded or failed
       deployment-status:
         description: 'Deployment status (success/failure)'
         value: `${{ jobs.deploy.outputs.status }}
-    
+
+    # =========================================================================
+    # SECRETS — Sensitive credentials passed in by the calling workflow
+    # =========================================================================
     secrets:
+      # JFrog Artifactory base URL (e.g., https://yourcompany.jfrog.io)
       JFROG_URL:
         description: 'JFrog Artifactory URL'
         required: true
+      # JFrog authentication username
       JFROG_USERNAME:
         description: 'JFrog username'
         required: true
+      # JFrog authentication password or API token
       JFROG_PASSWORD:
         description: 'JFrog password or API token'
         required: true
       $( if ($DeploymentType -in @('Azure', 'AKS')) {
 @"
-AZURE_SUBSCRIPTION_ID:
+# Azure service principal credentials for authentication
+      AZURE_SUBSCRIPTION_ID:
         description: 'Azure subscription ID'
         required: true
       AZURE_TENANT_ID:
@@ -690,14 +1014,16 @@ AZURE_SUBSCRIPTION_ID:
       } )
       $( if ($DeploymentType -eq 'AKS') {
 @"
-ACR_PASSWORD:
+# Azure Container Registry password for pushing Docker images
+      ACR_PASSWORD:
         description: 'Azure Container Registry password'
         required: true
 "@
       } )
       $( if ($DeploymentType -eq 'IIS') {
 @"
-IIS_USERNAME:
+# IIS server credentials for remote deployment via WinRM
+      IIS_USERNAME:
         description: 'IIS deployment username'
         required: true
       IIS_PASSWORD:
@@ -706,39 +1032,71 @@ IIS_USERNAME:
 "@
       } )
 
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+# These env vars are available to ALL steps in this workflow.
+# =============================================================================
 env:
+  # Application name — used in JFrog download path and logging
   APP_NAME: `${{ inputs.app-name }}
+  # Version to deploy — used to locate the correct artifact in JFrog
   APP_VERSION: `${{ inputs.version }}
+  # Target environment name (development/staging/production)
   TARGET_ENV: `${{ inputs.environment }}
 
+# =============================================================================
+# JOBS
+# =============================================================================
 jobs:
   deploy:
     name: Deploy to `${{ inputs.environment }}
+    # Run on the specified GitHub-hosted runner
     runs-on: `${{ inputs.runner }}
-    
+
+    # -------------------------------------------------------------------------
+    # ENVIRONMENT PROTECTION
+    # -------------------------------------------------------------------------
+    # Links this job to a GitHub Environment (e.g., 'production').
+    # If the environment has protection rules (required reviewers, wait timers),
+    # the job will pause until those rules are satisfied.
+    # The URL is displayed in the GitHub deployments page.
+    # -------------------------------------------------------------------------
     environment:
       name: `${{ inputs.environment }}
       url: `${{ steps.deploy.outputs.app_url }}
-    
+
+    # Job outputs — passed back to the calling workflow
     outputs:
       url: `${{ steps.deploy.outputs.app_url }}
       status: `${{ steps.set-status.outputs.status }}
-    
+
     steps:
-      # Step 1: Checkout repository
+      # -----------------------------------------------------------------------
+      # STEP 1: Checkout repository
+      # -----------------------------------------------------------------------
+      # Only checks out deployment/ and scripts/ folders (sparse-checkout)
+      # to speed up the checkout. We don't need the full source code here.
+      # -----------------------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
             deployment/
             scripts/
-      
-      # Step 2: Download artifacts from JFrog
+
+      # -----------------------------------------------------------------------
+      # STEP 2: Download artifacts from JFrog Artifactory
+      # -----------------------------------------------------------------------
+      # Downloads the build package (zip file) that the CI workflow published.
+      # Path in JFrog: {repository}/{app-name}/{version}/
+      # -----------------------------------------------------------------------
       - name: Download artifacts from JFrog
         shell: pwsh
         run: |
           Write-Host "Downloading artifacts from JFrog..." -ForegroundColor Cyan
-          
+
+          # Install JFrog CLI if not already available on the runner
           if (-not (Get-Command jfrog -ErrorAction SilentlyContinue)) {
             Write-Host "Installing JFrog CLI..." -ForegroundColor Yellow
             $( if ($DeploymentType -eq 'IIS') {
@@ -747,35 +1105,51 @@ jobs:
                 'curl -fL https://install-cli.jfrog.io | sh; sudo mv jfrog /usr/local/bin/'
             } )
           }
-          
+
+          # Configure JFrog CLI with credentials from secrets
           jfrog config add artifactory --url="`${{ secrets.JFROG_URL }}" --user="`${{ secrets.JFROG_USERNAME }}" --password="`${{ secrets.JFROG_PASSWORD }}" --interactive=false
-          
+
+          # Download the artifact for the specified version
           `$artifactPath = "`${{ inputs.jfrog-repository }}/`${{ inputs.app-name }}/`${{ inputs.version }}/"
           New-Item -ItemType Directory -Path "artifacts" -Force | Out-Null
           jfrog rt download "`$artifactPath" "artifacts/" --flat=false --recursive=true
-          
+
           Write-Host "✓ Artifacts downloaded" -ForegroundColor Green
-      
-      # Step 3: Pre-deployment steps
+
+      # -----------------------------------------------------------------------
+      # STEP 3: Pre-deployment — authenticate to deployment target
+      # -----------------------------------------------------------------------
 $preDeploySteps
-      
-      # Step 4: Deploy application
+
+      # -----------------------------------------------------------------------
+      # STEP 4: Deploy the application
+      # -----------------------------------------------------------------------
 $deploySteps
       
-      # Step 5: Health check
+      # -----------------------------------------------------------------------
+      # STEP 5: Post-deployment health check
+      # -----------------------------------------------------------------------
+      # Verifies the application is running correctly after deployment.
+      # First waits 60 seconds for the app to start up, then retries
+      # the readiness (/api/ready) and health (/api/health) endpoints
+      # up to 20 times with 30-second delays between attempts.
+      # Total max wait: ~11 minutes. Skipped if skip-health-check is true.
+      # -----------------------------------------------------------------------
       - name: Health check
         if: `${{ !inputs.skip-health-check }}
         shell: pwsh
         run: |
           Write-Host "Running health checks..." -ForegroundColor Cyan
-          
+
           `$appUrl = "`${{ steps.deploy.outputs.app_url }}"
           `$maxRetries = 20
           `$retryDelaySeconds = 30
-          
+
+          # Initial wait — give the app time to start before first check
           Write-Host "Waiting 60 seconds for deployment to settle..." -ForegroundColor Yellow
           Start-Sleep -Seconds 60
-          
+
+          # Common parameters for all HTTP requests
           `$iwrParams = @{
             Method = 'Get'
             TimeoutSec = 45
@@ -783,16 +1157,19 @@ $deploySteps
             SkipCertificateCheck = `$true
             ErrorAction = 'Stop'
           }
-          
+
+          # Retry loop — keep checking until health passes or max retries reached
           for (`$retryCount = 1; `$retryCount -le `$maxRetries; `$retryCount++) {
             `$elapsedSeconds = 60 + ((`$retryCount - 1) * `$retryDelaySeconds)
             Write-Host "Health check attempt `$retryCount/`$maxRetries (elapsed: `${elapsedSeconds}s)..." -ForegroundColor Yellow
-            
+
             try {
+              # First check: readiness endpoint — is the app ready to serve traffic?
               `$readyResponse = Invoke-WebRequest -Uri "`$appUrl/api/ready" @iwrParams
               if (`$readyResponse.StatusCode -eq 200) {
                 Write-Host "Readiness check passed" -ForegroundColor Green
-                
+
+                # Second check: health endpoint — are all dependencies healthy?
                 `$healthResponse = Invoke-WebRequest -Uri "`$appUrl/api/health" @iwrParams
                 if (`$healthResponse.StatusCode -eq 200) {
                   Write-Host "Health check passed" -ForegroundColor Green
@@ -803,17 +1180,24 @@ $deploySteps
             catch {
               Write-Host "Application is still starting: `$(`$_.Exception.Message)" -ForegroundColor DarkYellow
             }
-            
+
+            # Wait before next retry (unless this was the last attempt)
             if (`$retryCount -lt `$maxRetries) {
               Start-Sleep -Seconds `$retryDelaySeconds
             }
           }
-          
+
+          # If we get here, health checks never passed
           Write-Host "Health check did not pass after `$(((`$maxRetries - 1) * `$retryDelaySeconds) + 60) seconds" -ForegroundColor Red
           Write-Host "Check container logs: `$appUrl/scm/api/logs/docker" -ForegroundColor Yellow
           exit 1
-      
-      # Step 6: Set deployment status
+
+      # -----------------------------------------------------------------------
+      # STEP 6: Set final deployment status
+      # -----------------------------------------------------------------------
+      # Records the job status as an output so the orchestrator can read it.
+      # Runs even if deployment failed (if: always()) to ensure status is reported.
+      # -----------------------------------------------------------------------
       - name: Set deployment status
         id: set-status
         if: always()
@@ -844,50 +1228,93 @@ function Get-MainBuildWorkflow {
     $defaultVersion = if ($Language -eq '.NET') { '8.x' } elseif ($Language -eq 'Python') { '3.11' } else { '20' }
     
     $template = @"
-# Main Build Workflow
-# Project: $ProjectName
-# Language: $Language
-# Deployment: $DeploymentType
-# Purpose: Orchestrates CI/CD using reusable workflows
+# =============================================================================
+# MAIN BUILD WORKFLOW (ORCHESTRATOR)
+# =============================================================================
+#
+# PROJECT:    $ProjectName
+# LANGUAGE:   $Language
+# DEPLOYMENT: $DeploymentType
+#
+# PURPOSE:
+#   This is the ENTRY POINT for the CI/CD pipeline. It does NOT contain
+#   build or deploy logic itself — instead, it CALLS the reusable CI and CD
+#   workflows and passes them all the app-specific configuration.
+#
+# HOW TO REUSE FOR A NEW PROJECT:
+#   1. Change the values in the 'env:' block below (app name, paths, versions)
+#   2. That's it — the reusable workflows read everything from inputs.
+#
+# PIPELINE FLOW:
+#   Push/PR → config job → build job (CI) → deploy jobs (CD per environment)
+#
+# =============================================================================
 
 name: Build and Deploy
 
+# ---------------------------------------------------------------------------
+# TRIGGERS — When does this workflow run?
+# ---------------------------------------------------------------------------
+# 1. On push to main, develop, feature/*, or release/* branches
+# 2. On pull requests targeting main or develop
+# 3. Manual trigger via GitHub UI (workflow_dispatch) with environment selection
+# ---------------------------------------------------------------------------
 on:
   push:
     branches:
-      - main
-      - develop
-      - 'feature/**'
-      - 'release/**'
+      - main           # Production-ready code
+      - develop        # Integration branch → triggers dev deployment
+      - 'feature/**'   # Feature branches → CI only, no deployment
+      - 'release/**'   # Release branches → CI only
   pull_request:
     branches:
       - main
       - develop
   workflow_dispatch:
     inputs:
+      # Allows manual deployment to a specific environment from the GitHub UI
       environment:
         description: 'Deploy to environment'
         required: false
         type: choice
         options:
-          - none
+          - none         # Just build, don't deploy
           - development
           - staging
           - production
         default: 'none'
+      # Emergency flag to skip tests (use sparingly!)
       skip_tests:
         description: 'Skip running tests'
         required: false
         type: boolean
         default: false
 
-# Global environment variables
+# =============================================================================
+# CENTRALIZED CONFIGURATION
+# =============================================================================
+# *** CHANGE THESE VALUES FOR YOUR PROJECT ***
+# All app-specific settings are defined here in one place.
+# The reusable workflows receive these values via inputs.
+# =============================================================================
 env:
+  # Your application name — used for artifact naming and deployment
   APP_NAME: '$ProjectName'
+  # JFrog repository where build artifacts are stored
   JFROG_REPOSITORY: $( if ($DeploymentType -eq 'Azure') { "'azure-apps'" } elseif ($DeploymentType -eq 'AKS') { "'kubernetes-apps'" } else { "'iis-apps'" } )
 
+# =============================================================================
+# JOBS
+# =============================================================================
 jobs:
-  # Job 1: Build using reusable CI workflow
+
+  # ---------------------------------------------------------------------------
+  # JOB 1: BUILD — Calls the reusable CI workflow
+  # ---------------------------------------------------------------------------
+  # This job calls the reusable CI workflow and passes all app-specific
+  # configuration as inputs. The CI workflow handles:
+  # restore → build → test → security scan → package → publish to JFrog
+  # ---------------------------------------------------------------------------
   build:
     name: Build Application
     uses: ./.github/workflows/reusable-ci-$langLower.yml
@@ -898,17 +1325,25 @@ jobs:
       skip-tests: `${{ inputs.skip_tests || false }}
       skip-security-scan: false
       jfrog-repository: `${{ env.JFROG_REPOSITORY }}
+    # Pass all secrets through to the reusable workflow
     secrets:
       JFROG_URL: `${{ secrets.JFROG_URL }}
       JFROG_USERNAME: `${{ secrets.JFROG_USERNAME }}
       JFROG_PASSWORD: `${{ secrets.JFROG_PASSWORD }}
       SONAR_TOKEN: `${{ secrets.SONAR_TOKEN }}
       SNYK_TOKEN: `${{ secrets.SNYK_TOKEN }}
-  
-  # Job 2: Deploy to development (automatic on develop branch or manual dispatch)
+
+  # ---------------------------------------------------------------------------
+  # JOB 2: DEPLOY TO DEVELOPMENT
+  # ---------------------------------------------------------------------------
+  # Runs automatically on push to 'develop' branch, or manually when
+  # 'development' is selected in workflow_dispatch.
+  # Waits for the build job to complete successfully first (needs: build).
+  # ---------------------------------------------------------------------------
   deploy-dev:
     name: Deploy to Development
-    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'development') }}
+    # Only deploy on develop branch pushes or manual 'development' selection
+    if: `${{ (github.event_name == 'push' && github.ref == 'refs/heads/develop') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'development') }}
     needs: build
     uses: ./.github/workflows/reusable-cd-$( $DeploymentType.ToLower() ).yml
     with:
@@ -917,6 +1352,7 @@ jobs:
       environment: 'development'
       skip-health-check: false
       jfrog-repository: `${{ env.JFROG_REPOSITORY }}
+      # Environment-specific resource settings from GitHub Variables
       $( if ($DeploymentType -eq 'Azure') {
 @"
 resource-group: `${{ vars.DEV_RESOURCE_GROUP }}
@@ -939,12 +1375,18 @@ iis-server: `${{ vars.DEV_IIS_SERVER }}
       iis-deploy-path: `${{ vars.DEV_IIS_PATH }}
 "@
       } )
+    # 'secrets: inherit' passes ALL repository secrets to the reusable workflow
     secrets: inherit
-  
-  # Job 3: Deploy to staging (automatic on main branch or manual dispatch)
+
+  # ---------------------------------------------------------------------------
+  # JOB 3: DEPLOY TO STAGING
+  # ---------------------------------------------------------------------------
+  # Runs automatically on push to 'main' branch, or manually when
+  # 'staging' is selected in workflow_dispatch.
+  # ---------------------------------------------------------------------------
   deploy-staging:
     name: Deploy to Staging
-    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging') }}
+    if: `${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging') }}
     needs: build
     uses: ./.github/workflows/reusable-cd-$( $DeploymentType.ToLower() ).yml
     with:
@@ -976,11 +1418,19 @@ iis-server: `${{ vars.STAGING_IIS_SERVER }}
 "@
       } )
     secrets: inherit
-  
-  # Job 4: Deploy to production (manual trigger only)
+
+  # ---------------------------------------------------------------------------
+  # JOB 4: DEPLOY TO PRODUCTION
+  # ---------------------------------------------------------------------------
+  # Only runs via manual trigger (workflow_dispatch) when 'production'
+  # is selected. Never auto-deploys to production.
+  # Configure GitHub Environment protection rules (required reviewers,
+  # wait timers) in Settings → Environments → production.
+  # ---------------------------------------------------------------------------
   deploy-production:
     name: Deploy to Production
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'production' }}
+    # SAFETY: Production deployment requires manual trigger only
+    if: `${{ github.event_name == 'workflow_dispatch' && inputs.environment == 'production' }}
     needs: build
     uses: ./.github/workflows/reusable-cd-$( $DeploymentType.ToLower() ).yml
     with:
