@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 
 <#
 .SYNOPSIS
@@ -187,8 +187,8 @@ jobs:
         run: |
           `$version = "`${{ github.run_number }}"
           `$artifact = "`${{ inputs.app-name }}-`$version"
-          Write-Host "version=`$version" >> `$env:GITHUB_OUTPUT
-          Write-Host "artifact=`$artifact" >> `$env:GITHUB_OUTPUT
+          "version=`$version" | Out-File -FilePath `$env:GITHUB_OUTPUT -Append -Encoding utf8
+          "artifact=`$artifact" | Out-File -FilePath `$env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "Building version: `$version" -ForegroundColor Cyan
       
       # Step 3: Setup build environment
@@ -326,7 +326,7 @@ jobs:
           Write-Host "Packaging application..." -ForegroundColor Cyan
           `$packageName = "`$env:APP_NAME-`$env:APP_VERSION"
           $packageCommand
-          Write-Host "âœ“ Package created: artifacts/`$packageName.zip" -ForegroundColor Green
+          Write-Host "✓ Package created: artifacts/`$packageName.zip" -ForegroundColor Green
       
       # Step 9: Publish to JFrog Artifactory
       - name: Publish to JFrog
@@ -350,7 +350,7 @@ jobs:
           Write-Host "Uploading to `$targetPath" -ForegroundColor Cyan
           jfrog rt upload "artifacts/*" "`$targetPath" --flat=false --recursive=true
           
-          Write-Host "âœ“ Artifacts published successfully" -ForegroundColor Green
+          Write-Host "✓ Artifacts published successfully" -ForegroundColor Green
       
       # Step 10: Upload build artifacts to GitHub
       - name: Upload artifacts to GitHub
@@ -367,7 +367,7 @@ jobs:
         shell: pwsh
         run: |
           `$status = "`${{ job.status }}"
-          Write-Host "status=`$status" >> `$env:GITHUB_OUTPUT
+          "status=`$status" | Out-File -FilePath `$env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "`n=== Build Summary ===" -ForegroundColor Green
           Write-Host "Application: `$env:APP_NAME" -ForegroundColor Cyan
           Write-Host "Version: `$env:APP_VERSION" -ForegroundColor Cyan
@@ -399,7 +399,7 @@ function Get-ReusableCDWorkflow {
           Write-Host "Logging in to Azure..." -ForegroundColor Cyan
           az login --service-principal -u ${{ secrets.AZURE_CLIENT_ID }} -p ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
           az account set --subscription ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-          Write-Host "âœ“ Azure login successful" -ForegroundColor Green
+          Write-Host "✓ Azure login successful" -ForegroundColor Green
 '@
             
             $deploySteps = @'
@@ -439,7 +439,7 @@ function Get-ReusableCDWorkflow {
               --name ${{ inputs.resource-name }} `
               --query "defaultHostName" -o tsv
               
-            Write-Host "app_url=https://$appUrl" >> $env:GITHUB_OUTPUT
+            "app_url=https://$appUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
           elseif ($resourceType -eq "functionapp") {
             $zipFile = Get-ChildItem -Path "artifacts" -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
@@ -454,10 +454,10 @@ function Get-ReusableCDWorkflow {
               --name ${{ inputs.resource-name }} `
               --query "defaultHostName" -o tsv
               
-            Write-Host "app_url=https://$appUrl" >> $env:GITHUB_OUTPUT
+            "app_url=https://$appUrl" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
           
-          Write-Host "âœ“ Deployment uploaded" -ForegroundColor Green
+          Write-Host "✓ Deployment uploaded" -ForegroundColor Green
 '@
         }
         'AKS' {
@@ -469,7 +469,7 @@ function Get-ReusableCDWorkflow {
           az login --service-principal -u ${{ secrets.AZURE_CLIENT_ID }} -p ${{ secrets.AZURE_CLIENT_SECRET }} --tenant ${{ secrets.AZURE_TENANT_ID }}
           az aks get-credentials --resource-group ${{ inputs.aks-resource-group }} --name ${{ inputs.aks-cluster-name }}
           kubectl cluster-info
-          Write-Host "âœ“ Kubernetes setup complete" -ForegroundColor Green
+          Write-Host "✓ Kubernetes setup complete" -ForegroundColor Green
 '@
             
             $deploySteps = @'
@@ -496,9 +496,9 @@ function Get-ReusableCDWorkflow {
           kubectl rollout status deployment/${{ inputs.app-name }} -n ${{ inputs.kubernetes-namespace }} --timeout=300s
           
           $serviceIP = kubectl get service ${{ inputs.app-name }} -n ${{ inputs.kubernetes-namespace }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
-          Write-Host "app_url=http://$serviceIP" >> $env:GITHUB_OUTPUT
+          "app_url=http://$serviceIP" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           
-          Write-Host "âœ“ Deployment complete" -ForegroundColor Green
+          Write-Host "✓ Deployment complete" -ForegroundColor Green
 '@
         }
         'IIS' {
@@ -508,7 +508,7 @@ function Get-ReusableCDWorkflow {
         run: |
           Write-Host "Validating IIS server connection..." -ForegroundColor Cyan
           Test-NetConnection -ComputerName ${{ inputs.iis-server }} -Port 5985 -InformationLevel Detailed
-          Write-Host "âœ“ Connection validated" -ForegroundColor Green
+          Write-Host "✓ Connection validated" -ForegroundColor Green
 '@
             
             $deploySteps = @'
@@ -550,8 +550,8 @@ function Get-ReusableCDWorkflow {
           
           Remove-PSSession $session
           
-          Write-Host "app_url=http://${{ inputs.iis-server }}" >> $env:GITHUB_OUTPUT
-          Write-Host "âœ“ Deployment complete" -ForegroundColor Green
+          "app_url=http://${{ inputs.iis-server }}" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "✓ Deployment complete" -ForegroundColor Green
 '@
         }
     }
@@ -754,7 +754,7 @@ jobs:
           New-Item -ItemType Directory -Path "artifacts" -Force | Out-Null
           jfrog rt download "`$artifactPath" "artifacts/" --flat=false --recursive=true
           
-          Write-Host "âœ“ Artifacts downloaded" -ForegroundColor Green
+          Write-Host "✓ Artifacts downloaded" -ForegroundColor Green
       
       # Step 3: Pre-deployment steps
 $preDeploySteps
@@ -776,16 +776,24 @@ $deploySteps
           Write-Host "Waiting 60 seconds for deployment to settle..." -ForegroundColor Yellow
           Start-Sleep -Seconds 60
           
+          `$iwrParams = @{
+            Method = 'Get'
+            TimeoutSec = 45
+            UseBasicParsing = `$true
+            SkipCertificateCheck = `$true
+            ErrorAction = 'Stop'
+          }
+          
           for (`$retryCount = 1; `$retryCount -le `$maxRetries; `$retryCount++) {
             `$elapsedSeconds = 60 + ((`$retryCount - 1) * `$retryDelaySeconds)
             Write-Host "Health check attempt `$retryCount/`$maxRetries (elapsed: `${elapsedSeconds}s)..." -ForegroundColor Yellow
             
             try {
-              `$readyResponse = Invoke-WebRequest -Uri "`$appUrl/api/ready" -Method Get -TimeoutSec 10 -ErrorAction Stop
+              `$readyResponse = Invoke-WebRequest -Uri "`$appUrl/api/ready" @iwrParams
               if (`$readyResponse.StatusCode -eq 200) {
                 Write-Host "Readiness check passed" -ForegroundColor Green
                 
-                `$healthResponse = Invoke-WebRequest -Uri "`$appUrl/api/health" -Method Get -TimeoutSec 10 -ErrorAction Stop
+                `$healthResponse = Invoke-WebRequest -Uri "`$appUrl/api/health" @iwrParams
                 if (`$healthResponse.StatusCode -eq 200) {
                   Write-Host "Health check passed" -ForegroundColor Green
                   exit 0
@@ -812,7 +820,7 @@ $deploySteps
         shell: pwsh
         run: |
           `$status = "`${{ job.status }}"
-          Write-Host "status=`$status" >> `$env:GITHUB_OUTPUT
+          "status=`$status" | Out-File -FilePath `$env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "`n=== Deployment Summary ===" -ForegroundColor Green
           Write-Host "Application: `${{ inputs.app-name }}" -ForegroundColor Cyan
           Write-Host "Version: `${{ inputs.version }}" -ForegroundColor Cyan
@@ -1159,7 +1167,7 @@ This migration converts your Azure DevOps pipeline to GitHub Actions using:
 
 ## Concept Mapping
 
-### Service Connections â†’ GitHub Secrets
+### Service Connections → GitHub Secrets
 
 **Azure DevOps Service Connections** are replaced by **GitHub Repository Secrets**.
 
@@ -1177,7 +1185,7 @@ secrets:
 
 $serviceConnectionSection
 
-### Variable Groups â†’ GitHub Environments
+### Variable Groups → GitHub Environments
 
 **Azure DevOps Variable Groups** are replaced by **GitHub Environment Variables**.
 
@@ -1201,7 +1209,7 @@ environment:
   # Add: RESOURCE_GROUP = rg-prod
 ``````
 
-### Build/Release Patterns â†’ Workflow Patterns
+### Build/Release Patterns → Workflow Patterns
 
 #### Azure DevOps Multi-Stage Pipeline
 ``````yaml
@@ -1290,10 +1298,10 @@ Create the following structure in your repository:
 
 ``````
 .github/
-â””â”€â”€ workflows/
-    â”œâ”€â”€ build.yml                    # Main orchestrator
-    â”œâ”€â”€ reusable-ci-$langSlug.yml      # CI reusable workflow
-    â””â”€â”€ reusable-cd-$deploySlug.yml     # CD reusable workflow
+└── workflows/
+    ├── build.yml                    # Main orchestrator
+    ├── reusable-ci-$langSlug.yml      # CI reusable workflow
+    └── reusable-cd-$deploySlug.yml     # CD reusable workflow
 ``````
 
 ### Step 5: Configure Branch Protection
@@ -1435,14 +1443,14 @@ $troubleshootingSection
 
 ## Next Steps
 
-1. âœ… Complete secret migration
-2. âœ… Setup GitHub environments
-3. âœ… Test CI workflows
-4. âœ… Test CD workflows
-5. âœ… Configure branch protection
-6. âœ… Setup environment protection rules
-7. âœ… Train team on GitHub Actions
-8. âœ… Decommission Azure DevOps pipelines
+1. ✅ Complete secret migration
+2. ✅ Setup GitHub environments
+3. ✅ Test CI workflows
+4. ✅ Test CD workflows
+5. ✅ Configure branch protection
+6. ✅ Setup environment protection rules
+7. ✅ Train team on GitHub Actions
+8. ✅ Decommission Azure DevOps pipelines
 
 ## Additional Resources
 
