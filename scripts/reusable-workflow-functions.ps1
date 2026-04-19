@@ -764,7 +764,7 @@ $deploySteps
               `$retryCount++
               Write-Host "Healthcheck attempt `$retryCount of `$maxRetries..." -ForegroundColor Yellow
               
-              `$response = Invoke-WebRequest -Uri "`$appUrl/health" -Method Get -TimeoutSec 30
+              `$response = Invoke-WebRequest -Uri "`$appUrl/api/health" -Method Get -TimeoutSec 30
               
               if (`$response.StatusCode -eq 200) {
                 Write-Host "âœ“ Health check passed!" -ForegroundColor Green

@@ -908,7 +908,7 @@ function Get-PostDeploymentSteps {
               Write-Host "Health check attempt `$retryCount of `$maxRetries..." -ForegroundColor Yellow
               
               # Add your health check endpoint
-              `$response = Invoke-WebRequest -Uri "`$appUrl/health" -Method Get -TimeoutSec 30 -UseBasicParsing
+              `$response = Invoke-WebRequest -Uri "`$appUrl/api/health" -Method Get -TimeoutSec 30 -UseBasicParsing
               
               if (`$response.StatusCode -eq 200) {
                 Write-Host "✓ Health check passed!" -ForegroundColor Green
