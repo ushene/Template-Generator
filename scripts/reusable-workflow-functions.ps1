@@ -759,6 +759,10 @@ $deploySteps
           `$maxRetries = 10
           `$retryCount = 0
           
+          # Wait for initial deployment to settle
+          Write-Host "Waiting 60 seconds for deployment to settle..." -ForegroundColor Yellow
+          Start-Sleep -Seconds 60
+          
           while (`$retryCount -lt `$maxRetries) {
             try {
               `$retryCount++
