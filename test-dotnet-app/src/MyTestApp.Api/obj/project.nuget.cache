@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "dgSpecHash": "XdVCfK3kdbU=",
+  "dgSpecHash": "ARgLC8TD2cc=",
   "success": true,
   "projectFilePath": "C:\\Users\\lenoy\\OneDrive\\Desktop\\Template Generator\\test-dotnet-app\\src\\MyTestApp.Api\\MyTestApp.Api.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\lenoy\\.nuget\\packages\\microsoft.aspnetcore.openapi\\9.0.14\\microsoft.aspnetcore.openapi.9.0.14.nupkg.sha512",
-    "C:\\Users\\lenoy\\.nuget\\packages\\microsoft.openapi\\1.6.17\\microsoft.openapi.1.6.17.nupkg.sha512"
+    "C:\\Users\\lenoy\\.nuget\\packages\\microsoft.aspnetcore.openapi\\8.0.14\\microsoft.aspnetcore.openapi.8.0.14.nupkg.sha512",
+    "C:\\Users\\lenoy\\.nuget\\packages\\microsoft.openapi\\1.4.3\\microsoft.openapi.1.4.3.nupkg.sha512"
   ],
   "logs": []
 }

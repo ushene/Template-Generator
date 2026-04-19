@@ -415,10 +415,24 @@ function Get-ReusableCDWorkflow {
           if ($resourceType -eq "webapp") {
             $zipFile = Get-ChildItem -Path "artifacts" -Filter "*.zip" | Select-Object -First 1 -ExpandProperty FullName
             if (-not $zipFile) { throw "No deployment package found in artifacts folder" }
-            az webapp deployment source config-zip `
+            
+            $linuxFxVersion = az webapp config show `
               --resource-group ${{ inputs.resource-group }} `
               --name ${{ inputs.resource-name }} `
-              --src "$zipFile"
+              --query "linuxFxVersion" -o tsv
+            
+            Write-Host "App Service runtime: $linuxFxVersion" -ForegroundColor Cyan
+            if ($linuxFxVersion -and $linuxFxVersion -ne "DOTNETCORE|8.0") {
+              throw "App Service runtime '$linuxFxVersion' does not match this package target framework (net8.0). Set the web app runtime to DOTNETCORE|8.0 or retarget the app."
+            }
+            
+            Write-Host "Uploading package with az webapp deploy..." -ForegroundColor Yellow
+            az webapp deploy `
+              --resource-group `${{ inputs.resource-group }} `
+              --name `${{ inputs.resource-name }} `
+              --src-path "`$zipFile" `
+              --type zip `
+              --track-status false
               
             $appUrl = az webapp show `
               --resource-group ${{ inputs.resource-group }} `
@@ -443,7 +457,7 @@ function Get-ReusableCDWorkflow {
             Write-Host "app_url=https://$appUrl" >> $env:GITHUB_OUTPUT
           }
           
-          Write-Host "âœ“ Deployment complete" -ForegroundColor Green
+          Write-Host "âœ“ Deployment uploaded" -ForegroundColor Green
 '@
         }
         'AKS' {
@@ -756,34 +770,40 @@ $deploySteps
           Write-Host "Running health checks..." -ForegroundColor Cyan
           
           `$appUrl = "`${{ steps.deploy.outputs.app_url }}"
-          `$maxRetries = 10
-          `$retryCount = 0
+          `$maxRetries = 20
+          `$retryDelaySeconds = 30
           
-          # Wait for initial deployment to settle
           Write-Host "Waiting 60 seconds for deployment to settle..." -ForegroundColor Yellow
           Start-Sleep -Seconds 60
           
-          while (`$retryCount -lt `$maxRetries) {
+          for (`$retryCount = 1; `$retryCount -le `$maxRetries; `$retryCount++) {
+            `$elapsedSeconds = 60 + ((`$retryCount - 1) * `$retryDelaySeconds)
+            Write-Host "Health check attempt `$retryCount/`$maxRetries (elapsed: `${elapsedSeconds}s)..." -ForegroundColor Yellow
+            
             try {
-              `$retryCount++
-              Write-Host "Healthcheck attempt `$retryCount of `$maxRetries..." -ForegroundColor Yellow
-              
-              `$response = Invoke-WebRequest -Uri "`$appUrl/api/health" -Method Get -TimeoutSec 30
-              
-              if (`$response.StatusCode -eq 200) {
-                Write-Host "âœ“ Health check passed!" -ForegroundColor Green
-                break
+              `$readyResponse = Invoke-WebRequest -Uri "`$appUrl/api/ready" -Method Get -TimeoutSec 10 -ErrorAction Stop
+              if (`$readyResponse.StatusCode -eq 200) {
+                Write-Host "Readiness check passed" -ForegroundColor Green
+                
+                `$healthResponse = Invoke-WebRequest -Uri "`$appUrl/api/health" -Method Get -TimeoutSec 10 -ErrorAction Stop
+                if (`$healthResponse.StatusCode -eq 200) {
+                  Write-Host "Health check passed" -ForegroundColor Green
+                  exit 0
+                }
               }
             }
             catch {
-              if (`$retryCount -lt `$maxRetries) {
-                Start-Sleep -Seconds 30
-              } else {
-                Write-Host "âš ï¸  Health check failed" -ForegroundColor Red
-                exit 1
-              }
+              Write-Host "Application is still starting: `$(`$_.Exception.Message)" -ForegroundColor DarkYellow
+            }
+            
+            if (`$retryCount -lt `$maxRetries) {
+              Start-Sleep -Seconds `$retryDelaySeconds
             }
           }
+          
+          Write-Host "Health check did not pass after `$(((`$maxRetries - 1) * `$retryDelaySeconds) + 60) seconds" -ForegroundColor Red
+          Write-Host "Check container logs: `$appUrl/scm/api/logs/docker" -ForegroundColor Yellow
+          exit 1
       
       # Step 6: Set deployment status
       - name: Set deployment status
